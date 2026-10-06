@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root=$(git rev-parse --show-toplevel)
+style_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)
+cd "$repo_root"
+
+perlcritic_bin=${PERLCRITIC:-}
+if [ -z "$perlcritic_bin" ]; then
+  perlcritic_bin=$(git config --get overnet.perlcritic.bin || true)
+fi
+if [ -z "$perlcritic_bin" ]; then
+  perlcritic_bin=perlcritic
+fi
+perlcritic_profile=${OVERNET_PERLCRITIC_PROFILE:-.perlcriticrc}
+
+if [ ! -f "$perlcritic_profile" ]; then
+  echo "pre-commit: missing Perl::Critic profile: $perlcritic_profile" >&2
+  exit 1
+fi
+
+if ! command -v "$perlcritic_bin" >/dev/null 2>&1; then
+  echo "pre-commit: perlcritic not found: $perlcritic_bin" >&2
+  echo "pre-commit: install Perl::Critic, set PERLCRITIC=/path/to/perlcritic, or set git config overnet.perlcritic.bin" >&2
+  exit 1
+fi
+
+lint_paths=()
+test_paths=()
+while IFS= read -r -d '' path; do
+  case "$path" in
+    local/*|blib/*|_eumm/*)
+      continue
+      ;;
+  esac
+
+  [ -f "$path" ] || continue
+  case "$path" in
+    *.t)
+      test_paths+=("$path")
+      ;;
+    t/*|xt/*)
+      continue
+      ;;
+    *)
+      lint_paths+=("$path")
+      ;;
+  esac
+done < <(
+  git diff --cached --name-only -z --diff-filter=ACMR -- \
+    '*.pm' '*.pl' '*.t' '*.PL'
+)
+
+if [ "${#lint_paths[@]}" -eq 0 ] && [ "${#test_paths[@]}" -eq 0 ]; then
+  exit 0
+fi
+
+echo "pre-commit: profile $perlcritic_profile"
+
+export PERL5LIB="$style_root/lib${PERL5LIB:+:$PERL5LIB}"
+if [ "${#lint_paths[@]}" -gt 0 ]; then
+  echo "pre-commit: running Perl::Critic on ${#lint_paths[@]} Perl source path(s) staged for commit"
+  "$perlcritic_bin" \
+    --profile "$perlcritic_profile" \
+    --verbose '%f:%l:%c:%p:%m\n' \
+    "${lint_paths[@]}"
+fi
+
+if [ "${#test_paths[@]}" -gt 0 ]; then
+  echo "pre-commit: checking ${#test_paths[@]} staged test path(s) for Test2::V0"
+  "$perlcritic_bin" \
+    --profile "$perlcritic_profile" \
+    --single-policy Overnet::RequireTest2InTests \
+    --only \
+    --verbose '%f:%l:%c:%p:%m\n' \
+    "${test_paths[@]}"
+fi

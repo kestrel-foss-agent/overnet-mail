@@ -1,0 +1,218 @@
+{
+  "repository": "https://github.com/overnet-project/overnet-perl",
+  "commit": "63c450f5d36582e260e73e931271a9b02e0c9197",
+  "path": "overnet-perl-style",
+  "license": "GPL-3.0-only",
+  "files": [
+    {
+      "path": ".gitignore",
+      "sha": "be9fd9c064ac2faaa7b754dc79e3d0cde88a4434",
+      "mode": "100644"
+    },
+    {
+      "path": ".perlcriticrc",
+      "sha": "81a9af016377fcd6468424d9517456881aab895b",
+      "mode": "100644"
+    },
+    {
+      "path": ".perltidyrc",
+      "sha": "befcc7b51971ecb8dd62bb7e30e575229ce41996",
+      "mode": "100644"
+    },
+    {
+      "path": "LICENSE",
+      "sha": "f288702d2fa16d3cdf0035b15a9fcbc552cd88e7",
+      "mode": "100644"
+    },
+    {
+      "path": "Makefile.PL",
+      "sha": "83950f4274957df37de939a0f0ce47ccfac7cb94",
+      "mode": "100644"
+    },
+    {
+      "path": "README.md",
+      "sha": "575ba52050ac2c52822bd39b590b024082d40853",
+      "mode": "100644"
+    },
+    {
+      "path": "configs/git-hooks/pre-commit",
+      "sha": "5ffd221a299143eeff5836c490bc8043a319ae72",
+      "mode": "100755"
+    },
+    {
+      "path": "configs/github-actions/mutation.yml",
+      "sha": "e8c030a4910b488ca2d732ee076f1249c93ae1f6",
+      "mode": "100644"
+    },
+    {
+      "path": "configs/github-actions/perl-tests.yml",
+      "sha": "e4ade51ecdbe6f1b28a752db4f5ae2b5536114b4",
+      "mode": "100644"
+    },
+    {
+      "path": "configs/perlcriticrc-overnet",
+      "sha": "81a9af016377fcd6468424d9517456881aab895b",
+      "mode": "100644"
+    },
+    {
+      "path": "configs/perltidyrc-overnet",
+      "sha": "befcc7b51971ecb8dd62bb7e30e575229ce41996",
+      "mode": "100644"
+    },
+    {
+      "path": "configs/test-templates/xt/author/devel-cover.t",
+      "sha": "01faef3d0e3d09c0fa855e9c0b5a7c68fefe284a",
+      "mode": "100644"
+    },
+    {
+      "path": "configs/test-templates/xt/author/mutation.t",
+      "sha": "a5670388eab20383852ae079aff9e9d600231339",
+      "mode": "100644"
+    },
+    {
+      "path": "configs/test-templates/xt/author/perlcritic.t",
+      "sha": "5715582f799944668c8d48669c5ca9f9cb4dd0fe",
+      "mode": "100644"
+    },
+    {
+      "path": "configs/test-templates/xt/author/pod-coverage.t",
+      "sha": "8a2e0a2006c03f5e6c55a4f55507f472ab0e495d",
+      "mode": "100644"
+    },
+    {
+      "path": "configs/test-templates/xt/author/pod-syntax.t",
+      "sha": "1d5b7eb7385d3057bad5099db6ad525f8f8861c1",
+      "mode": "100644"
+    },
+    {
+      "path": "lib/Perl/Critic/Policy/Overnet/ProhibitBless.pm",
+      "sha": "595d754a2f4b602bbc833b20e6b4163f271c9d3f",
+      "mode": "100644"
+    },
+    {
+      "path": "lib/Perl/Critic/Policy/Overnet/ProhibitNewConstructor.pm",
+      "sha": "2af9bffb5b4a1a1ac0fce13bf9670a7c9352b7f4",
+      "mode": "100644"
+    },
+    {
+      "path": "lib/Perl/Critic/Policy/Overnet/RequireJSONEmptyImport.pm",
+      "sha": "d71feb16de61487e4f62636972f17d4d80091115",
+      "mode": "100644"
+    },
+    {
+      "path": "lib/Perl/Critic/Policy/Overnet/RequireMooConstructorArgsNormalization.pm",
+      "sha": "a0199e21c5eeae9ccbc2655b1906286ab5dd3f54",
+      "mode": "100644"
+    },
+    {
+      "path": "lib/Perl/Critic/Policy/Overnet/RequireStrictures2.pm",
+      "sha": "8f25290c6ae6312c7ef929f7c57ade883bb33030",
+      "mode": "100644"
+    },
+    {
+      "path": "lib/Perl/Critic/Policy/Overnet/RequireTest2InTests.pm",
+      "sha": "4e7a1e4608ad6c9bc933278e268d2031f08b736e",
+      "mode": "100644"
+    },
+    {
+      "path": "t/author-devel-cover-template.t",
+      "sha": "8e1b5e809b32a65634f78fbad3e455649041c293",
+      "mode": "100644"
+    },
+    {
+      "path": "t/author-mutation-template.t",
+      "sha": "29e90165bf1ad8c974311189506a346517081e41",
+      "mode": "100644"
+    },
+    {
+      "path": "t/author-perlcritic-template.t",
+      "sha": "e6a84bc8b36726e88110f177899ebc083bad466c",
+      "mode": "100644"
+    },
+    {
+      "path": "t/install-git-hooks.t",
+      "sha": "c7fb8e6f026690939344116b59f29205f2da8856",
+      "mode": "100644"
+    },
+    {
+      "path": "t/lib/OvernetPerlCriticPolicyTest.pm",
+      "sha": "18f1ed060cf2be695c7bc8ce7c3808aa8534d62e",
+      "mode": "100644"
+    },
+    {
+      "path": "t/perlcritic-overnet-prohibit-bless.t",
+      "sha": "549e5fb53b855f060cb401bd2b7b36dff3152875",
+      "mode": "100644"
+    },
+    {
+      "path": "t/perlcritic-overnet-prohibit-new-constructor.t",
+      "sha": "04d6a27e4525cc19803bc78b2242c42ba8530458",
+      "mode": "100644"
+    },
+    {
+      "path": "t/perlcritic-overnet-require-json-empty-import.t",
+      "sha": "0ba321cbe07f7620fba9ce8f1d3e64ade68dcb6d",
+      "mode": "100644"
+    },
+    {
+      "path": "t/perlcritic-overnet-require-moo-constructor-args-normalization.t",
+      "sha": "fd97e9737c292147fcec7012a9aef7ec18ce7b9b",
+      "mode": "100644"
+    },
+    {
+      "path": "t/perlcritic-overnet-require-strictures2.t",
+      "sha": "7e1307aac9ef4c0d51f8eb59836f7d128e1dc095",
+      "mode": "100644"
+    },
+    {
+      "path": "t/perlcritic-overnet-require-test2-in-tests.t",
+      "sha": "566aca1197dbd5f48cc53202808ccc545aa5ee71",
+      "mode": "100644"
+    },
+    {
+      "path": "t/perlcriticrc-overnet.t",
+      "sha": "6c4110537c34f77837a29132ee2d8600ec580c97",
+      "mode": "100644"
+    },
+    {
+      "path": "t/sync-configs.t",
+      "sha": "22bcaa96792e972f1351898cbac035fe4797cd23",
+      "mode": "100644"
+    },
+    {
+      "path": "tools/install-git-hooks",
+      "sha": "1b7a5ae77b7fbe728e48854be23b464e2e8c0f20",
+      "mode": "100755"
+    },
+    {
+      "path": "tools/sync-configs",
+      "sha": "fac5c58a87ff5325a051899b8c4884788f741b47",
+      "mode": "100755"
+    },
+    {
+      "path": "xt/author/devel-cover.t",
+      "sha": "01faef3d0e3d09c0fa855e9c0b5a7c68fefe284a",
+      "mode": "100644"
+    },
+    {
+      "path": "xt/author/mutation-allow.txt",
+      "sha": "005a05704ff9681d9333f63545b7ed0ad0e09f06",
+      "mode": "100644"
+    },
+    {
+      "path": "xt/author/mutation.t",
+      "sha": "a5670388eab20383852ae079aff9e9d600231339",
+      "mode": "100644"
+    },
+    {
+      "path": "xt/author/perlcritic.t",
+      "sha": "5715582f799944668c8d48669c5ca9f9cb4dd0fe",
+      "mode": "100644"
+    },
+    {
+      "path": "xt/author/pod-syntax.t",
+      "sha": "1d5b7eb7385d3057bad5099db6ad525f8f8861c1",
+      "mode": "100644"
+    }
+  ]
+}
