@@ -77,3 +77,7 @@ xt/author/mutation.t
 xt/author/perlcritic.t
 xt/author/pod-coverage.t
 xt/author/pod-syntax.t
+docs/local-storage.md
+lib/Overnet/Mail/Store.pm
+t/store.t
+t/store-recovery.t

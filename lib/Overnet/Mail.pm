@@ -22,9 +22,9 @@ Version 0.001.
 
 =head1 DESCRIPTION
 
-This distribution provides bounded in-memory raw-message, envelope and submission
-value objects, backed by shared quality gates. It does not yet persist, retrieve
-or deliver messages as a mail service.
+This distribution provides bounded raw-message, envelope and submission value
+objects plus transactional local SQLite acceptance, backed by shared quality
+gates. It does not yet deliver messages or operate as a mail service.
 
 Ordinary Internet email interoperability is a required application boundary.
 Mature SMTP and mailbox protocol implementations will own their wire protocols;
@@ -54,8 +54,9 @@ Perl versions older than 5.40 are unsupported.
 
 =head1 BUGS AND LIMITATIONS
 
-Only the in-memory message boundary is implemented. This release must not be
-used as a mail server, durable message store, or submission client.
+The message boundary and an embedded local-storage prototype are implemented.
+This release is not a production mail server, mailbox service or submission client.
+Authentication, protocol interoperability and operational recovery remain absent.
 
 =head1 AUTHOR
 

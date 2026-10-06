@@ -3,8 +3,8 @@
 A Perl email application built around ordinary Internet email compatibility.
 
 **Status: development, no running mail service.** The CI foundation is followed
-by a small in-memory message/envelope boundary. SMTP, durable mailbox storage,
-authentication and delivery services are not implemented or deployed yet.
+by immutable message/envelope objects and a small SQLite local-storage prototype.
+SMTP, authentication, outbox and delivery services are not implemented or deployed.
 
 The value objects preserve raw message octets and content hashes, keep the private
 envelope independent of visible headers, and reject Bcc/Resent-Bcc in finalized
@@ -28,8 +28,9 @@ CI tests Perl 5.40 and the latest stable Perl, builds/tests the source tarball,
 checks the original custom Perl::Critic policies, and requires per-application-file
 coverage of at least **95% statements, 85% branches, and 100% subroutines**.
 Missing quality dependencies fail before optional upstream templates can skip.
-Coverage applies to the current value-object boundary. It is not evidence that
-SMTP transport, persistence, ordinary-client interoperability or a mail service exists.
+Coverage applies to value objects and transactional local acceptance, including
+process-interruption recovery. It is not evidence that SMTP transport,
+ordinary-client interoperability or a deployed mail service exists.
 
 The complete upstream style package and five author templates are vendored at
 an immutable revision. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
@@ -49,11 +50,12 @@ Never copy another project's mutation-survivor allowlist.
 
 ## Architecture and next milestone
 
-See [the initial contracts](docs/architecture.md) and
-[compatibility acceptance matrix](docs/compatibility.md). Next comes a durable
-single-authority mailbox and transactional outbox, followed by tested native and
-Internet interoperability. Reuse maintained CPAN libraries and existing MTA and
-mailbox servers instead of implementing their protocols from scratch.
+See [the local storage contract](docs/local-storage.md),
+[initial contracts](docs/architecture.md) and
+[compatibility acceptance matrix](docs/compatibility.md). Local acceptance is now
+transactional; authentication and a per-recipient outbox remain next, followed by
+tested native and Internet interoperability. Reuse maintained CPAN libraries and
+existing MTA and mailbox servers instead of implementing their protocols from scratch.
 
 ## License
 
