@@ -1,0 +1,40 @@
+name: Manual Perl mutation
+
+on:
+  workflow_dispatch:
+    inputs:
+      files:
+        description: 'Existing lib/ modules to mutate (space- or colon-separated)'
+        required: true
+        type: string
+      test_command:
+        description: 'Focused suite to rerun per mutant'
+        required: false
+        default: 'prove -Ilib t'
+        type: string
+      timeout:
+        description: 'Per-mutant timeout in seconds'
+        required: false
+        default: '120'
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  mutation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: shogo82148/actions-setup-perl@53e33bb27be492a926eee378e8a5f7ff6618b061 # v1.43.1
+        with:
+          perl-version: '5.40'
+      - name: Install CPAN and pinned local style dependencies
+        run: bash scripts/install-deps.sh
+      - name: Require zero unreviewed survivors
+        env:
+          OVERNET_MUTATION_FILES: ${{ inputs.files }}
+          OVERNET_MUTATION_TEST_COMMAND: ${{ inputs.test_command }}
+          OVERNET_MUTATION_TIMEOUT: ${{ inputs.timeout }}
+        run: bash scripts/check.sh mutation

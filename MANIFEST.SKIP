@@ -1,0 +1,9 @@
+^\.git/
+^Makefile(?:\.old)?$
+^MYMETA\.
+^blib/
+^pm_to_blib$
+^cover_db/
+^vendor/overnet-perl-style/(?:Makefile$|MYMETA[.](?:json|yml)$|pm_to_blib$|blib/|_build/|cover_db/|nytprof[.]out$)
+^Overnet-Mail-[^/]+(?:/|\.tar\.gz$)
+(?:\.bak|\.tdy|\.ERR)$
