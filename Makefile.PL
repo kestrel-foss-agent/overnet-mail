@@ -20,6 +20,9 @@ WriteMakefile(
     'Email::Simple'      => '2.218',
     'Email::Address::XS' => '1.05',
     'Digest::SHA'        => '0',
+    'DBI'                => '1.643',
+    'DBD::SQLite'        => '1.72',
+    'JSON'               => '4.10',
   },
   TEST_REQUIRES => {
     'Test2::V0'   => '0',
