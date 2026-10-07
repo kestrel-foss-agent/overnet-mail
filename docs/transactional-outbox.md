@@ -48,7 +48,7 @@ It commits before returning a claim. Concurrent processes use separate Store
 connections and SQLite immediate transactions, so the same live attempt cannot
 be issued to two claimers. No transaction or writer lock spans network I/O.
 
-A future transport adapter can report one of four explicit classifications:
+A transport adapter can report one of four explicit classifications:
 
 - `confirmed` becomes `delivered`: requires conclusive acceptance evidence from
   the selected transport boundary; it does not mean the recipient read the mail
@@ -122,3 +122,7 @@ The implementation reuses the existing DBI, DBD::SQLite, Moo and value objects;
 no new dependency, custom mail protocol or live infrastructure is introduced.
 See [local storage](local-storage.md) for SQLite durability assumptions and
 [the original contracts](architecture.md) for production work still required.
+
+The subsequent [loopback SMTP prototype](local-smtp-adapter.md) exercises these
+classifications on local fixtures only. It performs no automatic queue writes or
+retries and is not an operational delivery service.

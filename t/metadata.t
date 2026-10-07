@@ -27,9 +27,9 @@ is $prereqs->requirements_for('test', 'requires')->requirements_for_module('Test
   'Test2::V0 explicitly declared';
 is $prereqs->requirements_for('runtime', 'requires')->requirements_for_module('perl'), '5.040', 'Perl 5.40 minimum';
 
-for my $module (qw(DBI DBD::SQLite JSON)) {
+for my $module (qw(DBI DBD::SQLite JSON Net::SMTP)) {
   ok defined $prereqs->requirements_for('runtime', 'requires')->requirements_for_module($module),
-    "$module storage dependency declared";
+    "$module runtime dependency declared";
 }
 chdir $cwd or die "chdir $cwd: $!";
 

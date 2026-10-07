@@ -84,3 +84,7 @@ t/store-recovery.t
 docs/transactional-outbox.md
 t/outbox.t
 t/outbox-recovery.t
+lib/Overnet/Mail/Transport/LoopbackSMTP.pm
+lib/Overnet/Mail/Transport/SMTPClient.pm
+t/local-smtp.t
+docs/local-smtp-adapter.md
