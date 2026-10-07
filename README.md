@@ -5,8 +5,8 @@ A Perl email application built around ordinary Internet email compatibility.
 **Status: development, no running mail service.** The CI foundation is followed
 by immutable message/envelope objects, SQLite local storage and an explicit
 transactional per-recipient outbox. A loopback-only SMTP adapter exercises local
-scripted fixtures; authentication and operational network delivery services are
-not implemented or deployed.
+scripted fixtures, and a one-shot runner records each fenced handoff. Authentication
+and operational network delivery services are not implemented or deployed.
 
 The value objects preserve raw message octets and content hashes, keep the private
 envelope independent of visible headers, and reject Bcc/Resent-Bcc in finalized
@@ -31,7 +31,7 @@ checks the original custom Perl::Critic policies, and requires per-application-f
 coverage of at least **95% statements, 85% branches, and 100% subroutines**.
 Missing quality dependencies fail before optional upstream templates can skip.
 Coverage applies to value objects and transactional local acceptance, including
-process-interruption recovery. It is not evidence that SMTP transport,
+process-interruption recovery. It is not evidence that production SMTP transport,
 ordinary-client interoperability or a deployed mail service exists.
 
 The complete upstream style package and five author templates are vendored at
@@ -57,7 +57,9 @@ See [the local storage contract](docs/local-storage.md),
 [compatibility acceptance matrix](docs/compatibility.md). Local acceptance is now
 transactional, with a [bounded per-recipient outbox](docs/transactional-outbox.md).
 A [local SMTP adapter](docs/local-smtp-adapter.md) now tests the handoff boundary
-using Net::SMTP. Authentication and production transport adapters remain next, followed by tested
+using Net::SMTP. A [one-shot delivery runner](docs/local-delivery-runner.md) joins
+that adapter to the durable outbox with explicit crash and completion ambiguity.
+Authentication and production transport adapters remain next, followed by tested
 native and Internet interoperability. Reuse maintained CPAN libraries and
 existing MTA and mailbox servers instead of implementing their protocols from scratch.
 

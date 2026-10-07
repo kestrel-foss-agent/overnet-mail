@@ -6,6 +6,7 @@ use Overnet::Mail;
 is $Overnet::Mail::VERSION, '0.001', 'foundation distribution loads';
 ok !Overnet::Mail->can('send'), 'foundation does not advertise unimplemented delivery';
 
+use Overnet::Mail::DeliveryRunner;
 use Overnet::Mail::Transport::LoopbackSMTP;
 use Overnet::Mail::Transport::SMTPClient;
 

@@ -94,8 +94,9 @@ There is no automatic retry, including after a lost final acknowledgement.
 
 ## Explicit worker mapping, no operational worker
 
-A future trusted worker claims one recipient and commits that lease before I/O,
-then calls the transport and passes only its `outcome` to `finish_delivery`, with
+The [one-shot runner](local-delivery-runner.md) now implements this trusted fixture
+mapping. It is not an operational worker. It claims one recipient and commits
+that lease before I/O, then calls the transport and passes only its `outcome` to `finish_delivery`, with
 the original mailbox, delivery ID, attempt and current trusted time. Transient
 and uncertain results require an explicit bounded `retry_after` (1–86400 seconds).
 The queue's existing attempt cap, lease expiry and fencing still apply. Tests

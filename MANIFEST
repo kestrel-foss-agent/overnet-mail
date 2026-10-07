@@ -88,3 +88,7 @@ lib/Overnet/Mail/Transport/LoopbackSMTP.pm
 lib/Overnet/Mail/Transport/SMTPClient.pm
 t/local-smtp.t
 docs/local-smtp-adapter.md
+lib/Overnet/Mail/DeliveryRunner.pm
+t/delivery-runner.t
+docs/local-delivery-runner.md
+t/delivery-runner-recovery.t
