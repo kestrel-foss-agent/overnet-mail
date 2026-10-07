@@ -22,8 +22,9 @@ Version 0.001.
 
 =head1 DESCRIPTION
 
-This distribution currently establishes the development and quality gates for
-Overnet Mail. It does not yet accept, store, retrieve, or deliver messages.
+This distribution provides bounded in-memory raw-message, envelope and submission
+value objects, backed by shared quality gates. It does not yet persist, retrieve
+or deliver messages as a mail service.
 
 Ordinary Internet email interoperability is a required application boundary.
 Mature SMTP and mailbox protocol implementations will own their wire protocols;
@@ -53,8 +54,8 @@ Perl versions older than 5.40 are unsupported.
 
 =head1 BUGS AND LIMITATIONS
 
-Email functionality is not implemented yet. This release must not be used as a
-mail server, message store, or submission client.
+Only the in-memory message boundary is implemented. This release must not be
+used as a mail server, durable message store, or submission client.
 
 =head1 AUTHOR
 

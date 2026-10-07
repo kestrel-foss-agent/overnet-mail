@@ -1,4 +1,4 @@
-^\.git/
+^\.git(?:/|$)
 ^Makefile(?:\.old)?$
 ^MYMETA\.
 ^blib/
