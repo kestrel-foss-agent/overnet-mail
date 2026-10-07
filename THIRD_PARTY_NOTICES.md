@@ -17,3 +17,11 @@ The upstream package declares GPL version 3 (`gpl_3`) in its Makefile.PL. The
 license text is preserved in `vendor/overnet-perl-style/LICENSE` and root `LICENSE`.
 New Overnet Mail source is licensed GPL-3.0-only as an explicit project choice.
 No upstream author or copyright notice is replaced by this notice.
+
+## SMTP client dependency
+
+The local SMTP adapter depends on CPAN libnet / Net::SMTP 3.15 or newer.
+No libnet source is vendored or copied. Its published license is the same terms
+as Perl (Artistic License or GNU General Public License); original notices remain
+with the installed dependency. See [Net::SMTP documentation and license](https://metacpan.org/pod/Net::SMTP).
+The application adapter and tests remain GPL-3.0-only.

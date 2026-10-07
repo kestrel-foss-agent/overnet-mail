@@ -23,6 +23,7 @@ WriteMakefile(
     'DBI'                => '1.643',
     'DBD::SQLite'        => '1.72',
     'JSON'               => '4.10',
+    'Net::SMTP'          => '3.15',
   },
   TEST_REQUIRES => {
     'Test2::V0'   => '0',
