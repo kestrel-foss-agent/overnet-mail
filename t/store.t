@@ -14,14 +14,17 @@ is $store->max_message_bytes,                            10_485_760, 'default ac
 is $store->_dbh->selectrow_array('PRAGMA synchronous'),  3,          'EXTRA sync selected';
 is $store->_dbh->selectrow_array('PRAGMA foreign_keys'), 1,          'foreign keys enforced';
 is $store->_dbh->selectrow_array('PRAGMA journal_mode'), 'delete',   'rollback journal selected';
+is $store->_dbh->selectrow_array('PRAGMA user_version'), 3,          'Blossom-backed store uses schema version three';
+is $store->_dbh->selectrow_array(q{SELECT COUNT(*) FROM sqlite_master WHERE name = 'contents'}), 0,
+  'legacy duplicate content table is absent';
 like dies { $store->path($path) }, qr/read-only/, 'configuration accessors read-only';
 
 my $wire    = "Message-ID: <same\@example.test>\r\nSubject: raw\r\n\r\n\0\xff\xc3\xa9\r\n";
 my $raw     = Overnet::Mail::RawMessage->new(raw_bytes => $wire);
 my $receipt = $store->accept_item(mailbox_id => 'box-1', idempotency_key => 'request-1', item => $raw);
 is $receipt, {message_id => 1, content_sha256 => sha256_hex($wire)}, 'receipt separates logical ID and content hash';
-is $store->_dbh->selectrow_array('SELECT typeof(raw_bytes) FROM contents'), 'blob', 'raw bytes bound as BLOB';
-is $store->_dbh->selectrow_array('SELECT length(raw_bytes) FROM contents'), length($wire),
+is $store->_dbh->selectrow_array('SELECT typeof(body) FROM blossom_blob_data'), 'blob', 'raw bytes bound as BLOB';
+is $store->_dbh->selectrow_array('SELECT length(body) FROM blossom_blob_data'), length($wire),
   'BLOB includes bytes after NUL';
 $store->disconnect;
 $store->disconnect;
@@ -46,8 +49,10 @@ ok !defined $store->load(mailbox_id => 'box-1',     message_id => 999), 'missing
 
 my $second = $store->accept_item(mailbox_id => 'box-1', idempotency_key => 'request-2', item => $raw);
 is $second->{message_id}, 2, 'same content with new key is a distinct logical message';
-is count_rows($store, 'contents'), 1, 'identical content shares one BLOB';
-is count_rows($store, 'messages'), 2, 'content sharing is not message deduplication';
+is count_rows($store, 'blossom_blob_data'), 1, 'identical content shares one BLOB';
+is count_rows($store, 'blossom_blobs'),     1, 'identical content shares one metadata record';
+is count_rows($store, 'blossom_owners'),    0, 'local mail acceptance does not invent Blossom ownership';
+is count_rows($store, 'messages'),          2, 'content sharing is not message deduplication';
 my $other = $store->accept_item(mailbox_id => 'other-box', idempotency_key => 'request-1', item => $raw);
 is $other->{message_id}, 3, 'idempotency namespace is mailbox-specific';
 my $different = Overnet::Mail::RawMessage->new(raw_bytes => "$wire different");

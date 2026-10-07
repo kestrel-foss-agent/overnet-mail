@@ -7,7 +7,8 @@ use POSIX      ();
 use Test2::V0;
 use Overnet::Mail::Store;
 
-my $dir        = tempdir(CLEANUP => 1);
+my $dir = tempdir(CLEANUP => 1);
+local $ENV{TMPDIR} = $dir;
 my $raw        = Overnet::Mail::RawMessage->new(raw_bytes => "Subject: recovery\r\n\r\n\0\xfforiginal");
 my $submission = Overnet::Mail::Submission->new(
   message  => $raw,
@@ -22,51 +23,73 @@ q{CREATE TRIGGER fail_recipient BEFORE INSERT ON recipients BEGIN SELECT RAISE(A
 my $error = dies { accept_item($store, $submission) };
 like $error,   qr/database operation failed/,  'late recipient insertion failure reported';
 unlike $error, qr/blind\@|secret|INSERT INTO/, 'driver errors omit sensitive SQL and trigger values';
-is counts($store), [0, 0, 0], 'all acceptance rows rolled back together';
+is counts($store), [0, 0, 0, 0], 'all acceptance rows rolled back together';
 $store->_dbh->do('DROP TRIGGER fail_recipient');
 my $receipt = accept_item($store, $submission);
-is counts($store), [1, 1, 1], 'retry succeeds after rollback using same key';
+is counts($store), [1, 1, 1, 1], 'retry succeeds after rollback using same key';
 $store->disconnect;
 
 # Corruption, including a missing blob, must fail instead of accepting phantom success.
 my @damage = (
-  [q{UPDATE contents SET raw_bytes = CAST('different' AS BLOB), size_bytes = 9}, qr/content integrity/],
-  [q{PRAGMA ignore_check_constraints=ON}, qr/content integrity/, q{UPDATE contents SET size_bytes = 1}],
   [
-    q{PRAGMA ignore_check_constraints=ON},
-    qr/content integrity/,
-    q{UPDATE contents SET raw_bytes = CAST(raw_bytes AS TEXT)}
+    'same-length changed bytes', qr/content integrity/, 1,
+    q{UPDATE blossom_blob_data SET body = zeroblob(length(body))}
   ],
-  [q{PRAGMA foreign_keys=OFF},                                qr/content is missing/, q{DELETE FROM contents}],
-  [q{DELETE FROM recipients},                                 qr/envelope integrity/],
-  [q{UPDATE recipients SET address = 'changed@example.test'}, qr/envelope integrity/],
-  [q{UPDATE messages SET sender = 'changed@example.test'},    qr/envelope integrity/],
+  ['metadata size',          qr/content integrity/, 1, q{UPDATE blossom_blobs SET size = 1}],
+  ['text metadata size',     qr/content integrity/, 1, q{UPDATE blossom_blobs SET size = 'blind@example.test private'}],
+  ['negative metadata size', qr/content integrity/, 1, q{UPDATE blossom_blobs SET size = -1}],
+  ['zero metadata size',     qr/content integrity/, 1, q{UPDATE blossom_blobs SET size = 0}],
+  ['fractional metadata size', qr/content integrity/, 1, q{UPDATE blossom_blobs SET size = 1.5}],
+  ['metadata type',            qr/content integrity/, 1, q{UPDATE blossom_blobs SET type = 'text/plain'}],
+  [
+    'metadata storage key',
+    qr/content integrity/,
+    1,
+    q{INSERT INTO blossom_blob_data (storage_key, body) SELECT 'other-key', body FROM blossom_blob_data},
+    q{UPDATE blossom_blobs SET storage_key = 'other-key'}
+  ],
+  [
+    'TEXT instead of BLOB bytes',
+    qr/content integrity/,
+    1,
+    q{PRAGMA ignore_check_constraints=ON},
+    q{UPDATE blossom_blob_data SET body = CAST(body AS TEXT)}
+  ],
+  ['missing bytes',      qr/content is missing/, 1, q{PRAGMA foreign_keys=OFF}, q{DELETE FROM blossom_blob_data}],
+  ['missing metadata',   qr/content is missing/, 1, q{PRAGMA foreign_keys=OFF}, q{DELETE FROM blossom_blobs}],
+  ['missing recipients', qr/envelope integrity/, 0, q{DELETE FROM recipients}],
+  ['changed recipient',  qr/envelope integrity/, 0, q{UPDATE recipients SET address = 'changed@example.test'}],
+  ['changed sender',     qr/envelope integrity/, 0, q{UPDATE messages SET sender = 'changed@example.test'}],
 );
 my $index = 0;
 for my $case (@damage) {
+  my ($label, $expected, $content_damage, @sql) = @{$case};
   my $file  = "$dir/damage-" . ++$index . '.db';
   my $db    = Overnet::Mail::Store->new(path => $file);
   my $saved = accept_item($db, $submission);
   $db->disconnect;
   my $direct = DBI->connect("dbi:SQLite:dbname=$file", q{}, q{}, {RaiseError => 1});
-  $direct->do($case->[0]);
-  $direct->do($case->[2]) if defined $case->[2];
+  $direct->do($_) for @sql;
   $direct->disconnect;
   $db = Overnet::Mail::Store->new(path => $file);
-  like dies { $db->load(mailbox_id => 'box', message_id => $saved->{message_id}) }, $case->[1],
-    'corrupt read fails closed';
-  like dies { accept_item($db, $submission) }, $case->[1], 'idempotent replay verifies persisted integrity';
+  my $read_error = dies { $db->load(mailbox_id => 'box', message_id => $saved->{message_id}) };
+  like $read_error,   $expected,                          "$label: corrupt read fails closed";
+  unlike $read_error, qr/blind\@|private/,                "$label: corrupt data does not leak in the diagnostic";
+  like dies { accept_item($db, $submission) }, $expected, "$label: replay verifies persisted integrity";
 
-  if ($index <= 4) {
-    like dies { $db->accept_item(mailbox_id => 'box', idempotency_key => 'new', item => $submission) }, $case->[1],
-      'shared content must validate before a new reference is accepted';
+  if ($content_damage) {
+    like dies { $db->accept_item(mailbox_id => 'box', idempotency_key => 'new', item => $submission) }, $expected,
+      "$label: shared content must validate before accepting a new reference";
   }
   $db->disconnect;
 }
 
-# SQLite foreign keys prevent ordinary orphan creation.
+# SQLite foreign keys prevent ordinary orphan creation in either Blossom table.
 $store = Overnet::Mail::Store->new(path => "$dir/rollback.db");
-like dies { $store->_dbh->do('DELETE FROM contents') }, qr/database operation failed/, 'foreign key rejects orphan';
+for my $table (qw(blossom_blob_data blossom_blobs)) {
+  like dies { $store->_dbh->do("DELETE FROM $table") }, qr/database operation failed/,
+    "foreign key rejects orphan after deleting $table";
+}
 
 # A simulated digest collision must not alias unequal raw bytes.
 {
@@ -115,7 +138,7 @@ for my $pragma ('PRAGMA synchronous', 'PRAGMA foreign_keys') {
     qr/commit interrupted/,
     'commit failure is not reported as acceptance';
 }
-is counts($store), [1, 1, 1], 'commit failure was rolled back';
+is counts($store), [1, 1, 1, 1], 'commit failure was rolled back';
 {
   local $store->_dbh->{Callbacks} = {
     commit   => sub { die "commit interrupted\n" },
@@ -130,12 +153,12 @@ $store->disconnect;
 
 # Process-interruption coverage: close all parent handles before fork, and reopen only in the child.
 SKIP: {
-  skip 'fork unavailable on this platform', 19 if !$Config{d_fork};
+  skip 'fork unavailable on this platform', 23 if !$Config{d_fork};
   my $large = Overnet::Mail::Submission->new(
     message  => Overnet::Mail::RawMessage->new(raw_bytes => "Subject: crash\r\n\r\n" . ('x' x 200_000)),
     envelope => $submission->envelope,
   );
-  for my $stage (qw(contents messages recipients commit)) {
+  for my $stage (qw(blossom_blob_data blossom_blobs messages recipients commit)) {
     my $file    = "$dir/crash-$stage.db";
     my $initial = Overnet::Mail::Store->new(path => $file);
     $initial->disconnect;
@@ -157,7 +180,7 @@ SKIP: {
     waitpid $pid, 0;
     is $? >> 8, 71, "process interrupted during $stage stage";
     my $reopened = Overnet::Mail::Store->new(path => $file);
-    is counts($reopened), [0, 0, 0], "no partial acceptance survives $stage interruption";
+    is counts($reopened), [0, 0, 0, 0], "no partial acceptance survives $stage interruption";
     ok accept_item($reopened, $large), "same key can retry after $stage interruption";
     is $reopened->load(mailbox_id => 'box', message_id => 1)->{message}->raw_bytes, $large->message->raw_bytes,
       "retry after $stage restores exact content";
@@ -199,7 +222,7 @@ SKIP: {
   }
   is \@statuses, [(0) x 6], 'concurrent same-key callers all observe the original logical ID';
   my $concurrent = Overnet::Mail::Store->new(path => $concurrent_file);
-  is counts($concurrent), [1, 1, 1], 'concurrent retries persist one acceptance and envelope';
+  is counts($concurrent), [1, 1, 1, 1], 'concurrent retries persist one acceptance and envelope';
   $concurrent->disconnect;
 }
 
@@ -212,5 +235,6 @@ sub accept_item {
 
 sub counts {
   my ($storage) = @_;
-  return [map { $storage->_dbh->selectrow_array("SELECT COUNT(*) FROM $_") } qw(contents messages recipients)];
+  return [map { $storage->_dbh->selectrow_array("SELECT COUNT(*) FROM $_") }
+      qw(blossom_blob_data blossom_blobs messages recipients)];
 }

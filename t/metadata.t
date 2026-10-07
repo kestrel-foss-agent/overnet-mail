@@ -27,7 +27,7 @@ is $prereqs->requirements_for('test', 'requires')->requirements_for_module('Test
   'Test2::V0 explicitly declared';
 is $prereqs->requirements_for('runtime', 'requires')->requirements_for_module('perl'), '5.040', 'Perl 5.40 minimum';
 
-for my $module (qw(DBI DBD::SQLite JSON Net::SMTP)) {
+for my $module (qw(DBI DBD::SQLite JSON Net::SMTP Net::Blossom::Server::Backend::SQLite)) {
   ok defined $prereqs->requirements_for('runtime', 'requires')->requirements_for_module($module),
     "$module runtime dependency declared";
 }

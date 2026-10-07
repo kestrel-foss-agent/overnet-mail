@@ -25,3 +25,19 @@ No libnet source is vendored or copied. Its published license is the same terms
 as Perl (Artistic License or GNU General Public License); original notices remain
 with the installed dependency. See [Net::SMTP documentation and license](https://metacpan.org/pod/Net::SMTP).
 The application adapter and tests remain GPL-3.0-only.
+
+## Net::Blossom storage dependency
+
+The application uses the published Net::Blossom::Server::Backend::SQLite
+distribution (minimum 0.001004), under GPL-3.0, as an external CPAN dependency.
+No Net::Blossom source is copied into this repository. SQLite 0.001004’s three
+runtime modules and Makefile.PL were verified byte-for-byte against upstream
+commit `084c7db09465f3470fec9748b4e467bea5f567f9`.
+
+- Source: https://github.com/NicholasBHubbard/Net-Blossom/tree/084c7db09465f3470fec9748b4e467bea5f567f9/dist/Net-Blossom-Server-Backend-SQLite
+- License: https://github.com/NicholasBHubbard/Net-Blossom/blob/084c7db09465f3470fec9748b4e467bea5f567f9/LICENSE
+- CPAN archive SHA-256: `32080b478b26698ade1529955652ae6d6348b4a013d4cd92fce1f50f432805a9`
+
+The mail adapter uses the public BlobStore/MetadataStore components rather than
+copying their backend infrastructure. Mail-specific policy and recovery guards
+remain in Overnet::Mail::Store. See `docs/blossom-storage.md`.

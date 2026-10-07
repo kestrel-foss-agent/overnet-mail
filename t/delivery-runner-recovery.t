@@ -13,7 +13,8 @@ use Overnet::Mail::Transport::LoopbackSMTP;
 
 plan skip_all => 'fork unavailable on this platform' if !$Config{d_fork};
 
-my $dir     = tempdir(CLEANUP => 1);
+my $dir = tempdir(CLEANUP => 1);
+local $ENV{TMPDIR} = $dir;
 my $counter = 0;
 my $raw =
     "From: visible\@example.test\r\nTo: unrelated\@example.test\r\nCc: visible-cc\@example.test\r\n"
@@ -31,10 +32,10 @@ subtest 'finalized enqueue and independent recipient custody' => sub {
 q{CREATE TEMP TRIGGER fail_enqueue BEFORE INSERT ON deliveries WHEN NEW.position = 1 BEGIN SELECT RAISE(ABORT, 'private trigger detail'); END}
   );
   like dies { enqueue($store, $submission) }, qr/database operation failed/, 'enqueue fails at the second recipient';
-  is counts($store), [0, 0, 0, 0, 0], 'message, private envelope and complete queue roll back atomically';
+  is counts($store), [0, 0, 0, 0, 0, 0], 'message, private envelope and complete queue roll back atomically';
   $store->_dbh->do('DROP TRIGGER fail_enqueue');
   my $receipt = enqueue($store, $submission);
-  is counts($store), [1, 1, 3, 1, 3], 'finalized submission explicitly creates one complete outbox';
+  is counts($store), [1, 1, 1, 3, 1, 3], 'finalized submission explicitly creates one complete outbox';
 
   my @cases = (
     [{}, 'confirmed', 'delivered'],
@@ -388,7 +389,7 @@ sub enqueue {
 sub counts {
   my ($store) = @_;
   return [map { $store->_dbh->selectrow_array("SELECT COUNT(*) FROM $_") }
-      qw(contents messages recipients submissions deliveries)];
+      qw(blossom_blob_data blossom_blobs messages recipients submissions deliveries)];
 }
 
 sub rows {

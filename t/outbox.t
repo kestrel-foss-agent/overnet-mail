@@ -26,8 +26,10 @@ is $receipt->{message_id},     3,                    'acceptance creates its own
 is $receipt->{submission_id},  1,                    'submission has a separate identity namespace';
 is $receipt->{delivery_ids},   [1, 2, 3],            'one delivery ID for each ordered recipient including duplicates';
 is $receipt->{content_sha256}, $raw->content_sha256, 'digest remains content-only identity';
-is $store->_dbh->selectrow_array('SELECT COUNT(*) FROM contents'), 1,
+is $store->_dbh->selectrow_array('SELECT COUNT(*) FROM blossom_blob_data'), 1,
   'archive and queued submissions share only immutable bytes';
+is $store->_dbh->selectrow_array('SELECT COUNT(*) FROM blossom_blobs'), 1,
+  'archive and queued submissions share one immutable metadata record';
 is enqueue($store, $submission), $receipt, 'duplicate enqueue returns identical receipt';
 $receipt->{delivery_ids}->[0] = 999;
 is enqueue($store, $submission)->{delivery_ids}, [1, 2, 3], 'receipt mutation cannot alter IDs';

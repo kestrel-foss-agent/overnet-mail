@@ -3,14 +3,17 @@ package Overnet::Mail::Store;
 use strictures 2;
 use Moo;
 
-use Carp         qw(croak);
-use DBI          qw(SQL_BLOB);
-use DBD::SQLite  ();
-use Digest::SHA  qw(sha256_hex);
-use English      qw(-no_match_vars);
-use File::Spec   ();
-use JSON         ();
-use Scalar::Util qw(blessed);
+use Carp                                           qw(croak);
+use DBI                                            ();
+use DBD::SQLite                                    ();
+use Digest::SHA                                    qw(sha256_hex);
+use English                                        qw(-no_match_vars);
+use File::Spec                                     ();
+use JSON                                           ();
+use Scalar::Util                                   qw(blessed);
+use Net::Blossom::Server::Backend::SQLite 0.001004 ();
+use Net::Blossom::Server::Backend::SQLite::BlobStore;
+use Net::Blossom::Server::Backend::SQLite::MetadataStore;
 use Overnet::Mail::Envelope;
 use Overnet::Mail::RawMessage;
 use Overnet::Mail::Submission;
@@ -20,6 +23,8 @@ our $VERSION = '0.001';
 has path              => (is => 'ro', required => 1);
 has max_message_bytes => (is => 'ro', default  => sub { return 10_485_760 });
 has _dbh              => (is => 'ro', init_arg => undef);
+has _blob_store       => (is => 'ro', init_arg => undef);
+has _metadata_store   => (is => 'ro', init_arg => undef);
 
 sub BUILD {
   my ($self) = @_;
@@ -54,6 +59,8 @@ sub BUILD {
   if ($dbh->selectrow_array('PRAGMA synchronous') != 3 || $dbh->selectrow_array('PRAGMA foreign_keys') != 1) {
     croak 'mail store durability settings unavailable';
   }
+  $self->{_blob_store}     = Net::Blossom::Server::Backend::SQLite::BlobStore->new(dbh => $dbh);
+  $self->{_metadata_store} = Net::Blossom::Server::Backend::SQLite::MetadataStore->new(dbh => $dbh);
   $self->_transaction(sub { $self->_initialize; return 1 });
   return;
 }
@@ -63,25 +70,21 @@ sub _initialize {
   my $dbh         = $self->_dbh;
   my $version     = $dbh->selectrow_array('PRAGMA user_version');
   my $application = $dbh->selectrow_array('PRAGMA application_id');
-  return if $version == 2 && $application == 1_330_463_049;
+  return if $version == 3 && $application == 1_330_463_049;
   my $tables = $dbh->selectrow_array('SELECT COUNT(*) FROM sqlite_master');
   if ($version || $application || $tables) {
     croak 'unsupported mail store schema';
   }
+  $self->_blob_store->deploy_schema;
+  $self->_metadata_store->deploy_schema;
   for my $sql (
-    <<'CONTENTS',
-CREATE TABLE contents (
-      content_sha256 TEXT PRIMARY KEY NOT NULL,
-      raw_bytes BLOB NOT NULL CHECK(typeof(raw_bytes) = 'blob'),
-      size_bytes INTEGER NOT NULL CHECK(size_bytes > 0 AND length(raw_bytes) = size_bytes)
-)
-CONTENTS
     <<'MESSAGES',
 CREATE TABLE messages (
       message_id INTEGER PRIMARY KEY AUTOINCREMENT,
       mailbox_id TEXT NOT NULL,
       idempotency_key TEXT NOT NULL,
-      content_sha256 TEXT NOT NULL REFERENCES contents(content_sha256),
+      content_sha256 TEXT NOT NULL REFERENCES blossom_blobs(sha256)
+        REFERENCES blossom_blob_data(storage_key),
       sender TEXT,
       signature TEXT NOT NULL,
       UNIQUE(mailbox_id, idempotency_key)
@@ -123,7 +126,7 @@ CREATE TABLE deliveries (
 DELIVERIES
     'CREATE INDEX deliveries_due ON deliveries(state, next_attempt_at, delivery_id)',
     'PRAGMA application_id = 1330463049',
-    'PRAGMA user_version = 2',
+    'PRAGMA user_version = 3',
   ) {
     $dbh->do($sql);
   }
@@ -379,23 +382,37 @@ sub _item {
 
 sub _store_content {
   my ($self, $message) = @_;
-  my $dbh    = $self->_dbh;
-  my $sha    = $message->content_sha256;
-  my $exists = $dbh->selectrow_array('SELECT 1 FROM contents WHERE content_sha256 = ?', undef, $sha);
-  if ($exists) {
+  my $dbh = $self->_dbh;
+  my $sha = $message->content_sha256;
+  $self->_metadata_store->lock_blob($sha);
+  if ($self->_metadata_store->find_blob($sha)) {
     if ($self->_content($sha)->raw_bytes ne $message->raw_bytes) {
       croak 'stored content conflicts with accepted bytes';
     }
     return;
   }
-  if ($dbh->selectrow_array('SELECT 1 FROM messages WHERE content_sha256 = ? LIMIT 1', undef, $sha)) {
+  if ($dbh->selectrow_array('SELECT 1 FROM messages WHERE content_sha256 = ? LIMIT 1', undef, $sha)
+    || defined $self->_blob_store->get_blob($sha)) {
     croak 'stored content is missing';
   }
-  my $sth = $dbh->prepare('INSERT INTO contents (content_sha256, raw_bytes, size_bytes) VALUES (?, ?, ?)');
-  $sth->bind_param(1, $sha);
-  $sth->bind_param(2, $message->raw_bytes, SQL_BLOB);
-  $sth->bind_param(3, $message->size_bytes);
-  $sth->execute;
+  my $ok = eval {
+    my $upload = $self->_blob_store->begin_upload;
+    push @{$self->{_uploads}}, $upload;
+    $upload->write($message->raw_bytes);
+    my %metadata = (
+      sha256   => $sha,
+      size     => $message->size_bytes,
+      type     => 'application/octet-stream',
+      uploaded => time,
+    );
+    my $key = $upload->prepare(%metadata);
+    $self->_metadata_store->insert_blob(%metadata, storage_key => $key);
+    1;
+  };
+  croak 'mail store blob operation failed' if !$ok;
+  if ($self->_content($sha)->raw_bytes ne $message->raw_bytes) {
+    croak 'stored content conflicts with accepted bytes';
+  }
   return;
 }
 
@@ -433,18 +450,21 @@ sub _record {
 
 sub _content {
   my ($self, $sha) = @_;
-  my $row = $self->_dbh->selectrow_hashref(
-    'SELECT raw_bytes, size_bytes, typeof(raw_bytes) AS storage_type FROM contents WHERE content_sha256 = ?',
-    undef, $sha,);
-  if (!$row) {
-    croak 'stored content is missing';
-  }
-  if ( $row->{storage_type} ne 'blob'
-    || length($row->{raw_bytes}) != $row->{size_bytes}
-    || sha256_hex($row->{raw_bytes}) ne $sha) {
+  my $row = $self->_metadata_store->find_blob($sha);
+  croak 'stored content is missing' if !$row;
+  my $bytes = $self->_blob_store->get_blob($row->{storage_key});
+  croak 'stored content is missing' if !defined $bytes;
+  my $type = $self->_dbh->selectrow_array('SELECT typeof(body) FROM blossom_blob_data WHERE storage_key = ?',
+    undef, $row->{storage_key},);
+  if ( $row->{storage_key} ne $sha
+    || $row->{type} ne 'application/octet-stream'
+    || $type ne 'blob'
+    || $row->{size} !~ /\A[1-9][0-9]*\z/smx
+    || length($bytes) != $row->{size}
+    || sha256_hex($bytes) ne $sha) {
     croak 'stored content integrity check failed';
   }
-  return Overnet::Mail::RawMessage->new(raw_bytes => $row->{raw_bytes}, max_bytes => $row->{size_bytes});
+  return Overnet::Mail::RawMessage->new(raw_bytes => $bytes, max_bytes => $row->{size});
 }
 
 sub _signature {
@@ -468,30 +488,47 @@ sub _token {
 sub _transaction {
   my ($self, $code) = @_;
   my $dbh = $self->_dbh;
-  croak 'mail store is closed' if !$dbh;
+  croak 'mail store is closed'                     if !$dbh;
+  croak 'mail store transaction is already active' if !$dbh->{AutoCommit};
+  $self->{_uploads} = [];
   my $result;
   my $ok = eval {
-    $dbh->begin_work;
-    $result = $code->();
-    $dbh->commit;
+    $result = $self->_metadata_store->with_transaction($code);
     1;
   };
+  my $error = $EVAL_ERROR;
   if (!$ok) {
-    my $error       = $EVAL_ERROR;
     my $rolled_back = eval {
       if (!$dbh->{AutoCommit}) {
         $dbh->rollback;
       }
       1;
     };
+    my $cleaned = $self->_cleanup_uploads(0);
     if (!$rolled_back) {
       $self->{_dbh} = undef;
       $dbh->disconnect;
       croak 'mail store rollback failed; reopen required';
     }
+    croak 'mail store upload cleanup failed; retry the original request key' if !$cleaned;
     croak $error;
   }
+  croak 'mail store upload cleanup failed; acceptance committed, retry the original request key'
+    if !$self->_cleanup_uploads(1);
   return $result;
+}
+
+sub _cleanup_uploads {
+  my ($self, $committed) = @_;
+  my $ok      = 1;
+  my $uploads = delete $self->{_uploads};
+  for my $upload (@{$uploads}) {
+    my $cleaned = eval { $committed ? $upload->commit : $upload->abort; 1 };
+    if (!$cleaned) {
+      $ok = 0;
+    }
+  }
+  return $ok;
 }
 
 sub disconnect {
@@ -509,7 +546,7 @@ __END__
 
 =head1 NAME
 
-Overnet::Mail::Store - transactional local mailbox acceptance using SQLite
+Overnet::Mail::Store - transactional mailbox acceptance on Net::Blossom SQLite storage
 
 =head1 VERSION
 
@@ -528,7 +565,8 @@ Version 0.001.
 
 =head1 DESCRIPTION
 
-One local SQLite database owns message records, exact raw BLOBs, private
+Net::Blossom SQLite byte and metadata components share one DBI handle with mail
+tables. One transaction owns message records, exact raw BLOBs, private
 submission envelopes and an explicitly requested per-recipient outbox. Acceptance returns only after the transaction commits.
 A repeated mailbox-scoped idempotency key returns the original receipt only for
 the identical item. Content hashes share storage; they do not deduplicate logical
@@ -541,11 +579,14 @@ messages. RFC Message-ID is opaque message content and has no uniqueness role.
 Accepts named arguments or a hash reference. Required C<path> is an absolute local
 filename without semicolons or controls. The parent directory must exist and be
 private to the application. New or empty databases are initialized; unknown
-schema versions and nonempty foreign databases are rejected.
+schema versions and nonempty foreign databases are rejected. Schema version 3
+rejects prior mail versions 1 and 2 without migration or alteration. PostgreSQL,
+filesystem and S3 backends are not supported by this adapter.
 
 =head2 BUILD
 
-Moo initialization callback; opens the database and verifies required settings.
+Moo initialization callback; opens the database, constructs shared Net::Blossom
+components and verifies required settings.
 
 =head2 path
 
