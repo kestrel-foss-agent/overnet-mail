@@ -1,0 +1,79 @@
+name: mutation
+
+# Manual-only Devel::Mutator gate. Mutation testing reruns the whole selected
+# suite once per mutant, so it is far too slow for push/PR CI -- it is triggered
+# by hand from the Actions tab (or the gh CLI) to pressure-test a specific
+# module's assertions. It runs the synced xt/author/mutation.t template, which
+# mutates in a throwaway copy beside the repo and fails on any UNREVIEWED
+# surviving mutant. Reviewed-equivalent survivors are pinned individually in
+# xt/author/mutation-allow.txt (see that template's header).
+#
+# Add sibling repo checkouts and PERL5LIB entries to match the repo's own test
+# job so the mutant suites resolve their cross-repo dependencies.
+on:
+  workflow_dispatch:
+    inputs:
+      files:
+        description: 'lib/ modules to mutate (space- or colon-separated), e.g. lib/Overnet/Foo.pm'
+        required: true
+        type: string
+      test_command:
+        description: 'Suite to run per mutant -- scope it tight, it reruns once per mutant'
+        required: false
+        default: 'prove -Ilib t'
+        type: string
+      timeout:
+        description: 'Per-mutant seconds before a mutant is judged inconclusive'
+        required: false
+        default: '120'
+        type: string
+      max_survivors:
+        description: 'Tolerated UNREVIEWED survivors (normally 0; prefer the allowlist file)'
+        required: false
+        default: '0'
+        type: string
+      perl_version:
+        description: 'Perl version to run under'
+        required: false
+        default: '5.40'
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  mutation:
+    runs-on: ubuntu-latest
+    name: Devel::Mutator gate
+    timeout-minutes: 120
+    env:
+      PERL5LIB: /home/runner/perl5/lib/perl5
+      PERL_LOCAL_LIB_ROOT: /home/runner/perl5
+      PERL_MB_OPT: --install_base /home/runner/perl5
+      PERL_MM_OPT: INSTALL_BASE=/home/runner/perl5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shogo82148/actions-setup-perl@v1
+        with:
+          perl-version: ${{ inputs.perl_version }}
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/perl5
+          key: perl-mutation-${{ inputs.perl_version }}-${{ hashFiles('Makefile.PL', '.github/workflows/mutation.yml') }}
+
+      - name: Install dependencies
+        run: |
+          cpanm --local-lib ~/perl5 --installdeps .
+          cpanm --local-lib ~/perl5 --notest Devel::Mutator
+
+      - name: Run mutation gate
+        env:
+          OVERNET_MUTATION: '1'
+          OVERNET_MUTATION_FILES: ${{ inputs.files }}
+          OVERNET_MUTATION_TEST_COMMAND: ${{ inputs.test_command }}
+          OVERNET_MUTATION_TIMEOUT: ${{ inputs.timeout }}
+          OVERNET_MUTATION_MAX_SURVIVORS: ${{ inputs.max_survivors }}
+        run: |
+          prove -l -v xt/author/mutation.t

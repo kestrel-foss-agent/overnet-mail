@@ -1,0 +1,60 @@
+name: perl-tests
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          cpanm --installdeps .
+          cpanm /path/to/overnet-perl-style
+
+      - name: Run tests
+        run: |
+          prove -r -l -v t/
+          prove -r -l -v xt/author/
+
+  # Opt-in Devel::Cover gate: runs the synced xt/author/devel-cover.t template,
+  # which enforces per-file floors of 95% statement / 85% branch / 100%
+  # subroutine over lib/. Repos below a floor pin OVERNET_COVERAGE_MIN_* here
+  # as a ratchet. Add sibling repo checkouts and PERL5LIB entries to match the
+  # repo's own test job.
+  devel-cover:
+    runs-on: ubuntu-latest
+    name: Devel::Cover gate
+    timeout-minutes: 90
+    env:
+      PERL5LIB: /home/runner/perl5/lib/perl5
+      PERL_LOCAL_LIB_ROOT: /home/runner/perl5
+      PERL_MB_OPT: --install_base /home/runner/perl5
+      PERL_MM_OPT: INSTALL_BASE=/home/runner/perl5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shogo82148/actions-setup-perl@v1
+        with:
+          perl-version: '5.40'
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/perl5
+          key: perl-devel-cover-5.40-${{ hashFiles('Makefile.PL', '.github/workflows/test.yml') }}
+
+      - name: Install dependencies
+        run: |
+          cpanm --local-lib ~/perl5 --installdeps .
+          cpanm --local-lib ~/perl5 --notest Devel::Cover
+          echo "$HOME/perl5/bin" >> "$GITHUB_PATH"
+
+      - name: Enforce per-file coverage floors
+        env:
+          OVERNET_COVERAGE: '1'
+        run: prove -l -v xt/author/devel-cover.t

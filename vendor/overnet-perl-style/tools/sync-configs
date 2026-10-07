@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+style_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
+config_root="$style_root/configs"
+template_root="$config_root/test-templates"
+
+if [ "$#" -eq 0 ]; then
+  echo "usage: $0 REPO_DIR [REPO_DIR ...]" >&2
+  exit 2
+fi
+
+sync_file() {
+  local repo_root=$1
+  local repo_name=$2
+  local source=$3
+  local target_name=$4
+  local target="$repo_root/$target_name"
+  local target_dir
+
+  if [ ! -f "$source" ]; then
+    echo "missing source file: $source" >&2
+    exit 1
+  fi
+
+  if cmp -s "$source" "$target"; then
+    echo "$repo_name: $target_name already current"
+    return
+  fi
+
+  target_dir=$(dirname "$target")
+  mkdir -p "$target_dir"
+  cp "$source" "$target"
+  echo "$repo_name: updated $target_name"
+}
+
+remove_stale_author_test() {
+  local repo_root=$1
+  local repo_name=$2
+  local source=$3
+  local relative=$4
+  local old_name
+  local old_target
+
+  case "$relative" in
+    xt/author/*.t) ;;
+    *) return ;;
+  esac
+
+  old_name=$(basename "$relative")
+  old_target="$repo_root/t/$old_name"
+
+  if [ ! -f "$old_target" ]; then
+    return
+  fi
+
+  if ! cmp -s "$source" "$old_target"; then
+    echo "$repo_name: left t/$old_name unchanged; it does not match the managed template"
+    return
+  fi
+
+  rm "$old_target"
+  echo "$repo_name: removed stale t/$old_name"
+}
+
+for repo_arg in "$@"; do
+  repo_root=$(git -C "$repo_arg" rev-parse --show-toplevel 2>/dev/null) || {
+    echo "not a git repo: $repo_arg" >&2
+    exit 1
+  }
+  repo_name=$(basename "$repo_root")
+
+  sync_file "$repo_root" "$repo_name" "$config_root/perlcriticrc-overnet" ".perlcriticrc"
+  sync_file "$repo_root" "$repo_name" "$config_root/perltidyrc-overnet" ".perltidyrc"
+
+  while IFS= read -r -d '' template; do
+    relative=${template#"$template_root/"}
+    sync_file "$repo_root" "$repo_name" "$template" "$relative"
+    remove_stale_author_test "$repo_root" "$repo_name" "$template" "$relative"
+  done < <(find "$template_root" -type f -name '*.t' -print0 | sort -z)
+done

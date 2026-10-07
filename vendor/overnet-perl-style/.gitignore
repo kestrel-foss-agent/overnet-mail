@@ -1,0 +1,11 @@
+/Makefile
+/MYMETA.json
+/MYMETA.yml
+/blib/
+/pm_to_blib
+*.bak
+*.tdy
+*.ERR
+/_build/
+/cover_db/
+/nytprof.out

@@ -1,0 +1,19 @@
+# Equivalent: _significant_tokens only feeds _assigns_raw_at_underscore_to_hash_args,
+# which inspects tokens[0] eq 'my', the first '=' operator, %args Symbols on the LHS
+# and @_ Magic tokens on the RHS. Widening the find() filter to '||' merely also
+# collects whitespace, comments, and PPI::Structure container nodes -- none of which
+# are the Word 'my', an '=' operator, a '%args' Symbol, or a '@_' Magic token, and
+# none of which can displace the leading 'my' from index 0. Every discriminating
+# check is therefore unchanged, so no input can distinguish this mutant.
+-      return $token->isa('PPI::Token') || !_is_insignificant($token);
++      return $token->isa('PPI::Token') && !_is_insignificant($token);
+
+# Equivalent: the RHS slice only matters after %args is confirmed present in the LHS,
+# which means the statement is a `my (... %args ...) = <rhs>` declaration. The token at
+# $assignment_index - 1 is then the last LHS declaration target (a variable or the
+# closing ')'), and Perl cannot declare @_ with `my`, so that extra token is never a
+# '@_' Magic token. The mutant's RHS is a strict superset that only ever adds that
+# non-@_ token plus the '=' operator, so the `any { Magic && '@_' }` result is identical
+# for every reachable input.
+-  my @rhs_tokens = @tokens[$assignment_index - 1 .. $#tokens];
++  my @rhs_tokens = @tokens[$assignment_index + 1 .. $#tokens];
