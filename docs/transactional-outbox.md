@@ -1,6 +1,6 @@
 # Transactional per-recipient outbox
 
-This is a local, trusted-caller queue built on the existing DBI/DBD::SQLite store.
+This is a local, trusted-caller queue built on the shared Net::Blossom SQLite store.
 It implements no network sender, SMTP/IMAP service, authentication, relay policy,
 retry daemon, DSN/bounce generation or delivery guarantees beyond its local
 transactions. No test sends mail or contacts a live service. The ordinary-client
@@ -104,10 +104,10 @@ mail data under the existing local storage contract.
 
 ## Versioning and verification
 
-New databases use schema version 2. Version 1 databases are rejected without
+New databases use schema version 3. Version 1 and 2 databases are rejected without
 changing their schema, messages, BLOB bytes, envelope or markers. There is no
 implicit migration or retroactive enqueue. Keep using the preceding code for
-existing version-1 data until an explicit backed-up migration is implemented;
+existing version-1 or version-2 data until an explicit backed-up migration is implemented;
 do not relabel the version marker or create a replacement database over old data.
 The same marker-only recognition limitation documented for local storage remains.
 
@@ -115,11 +115,12 @@ Tests cover insert/commit exceptions, process interruption during all acceptance
 stages, partial recipient outcomes, duplicates and stable replay, six-process
 concurrent enqueue/claim, expired/stale lease fencing, attempt exhaustion,
 reconnect persistence, damaged queue replay, lost commit acknowledgements and
-version-1 data preservation. All existing style, coverage and source-distribution
+version-1 and version-2 data preservation. All existing style, coverage and source-distribution
 gates apply. Process exits are not simulated hardware or power-loss certification.
 
-The implementation reuses the existing DBI, DBD::SQLite, Moo and value objects;
-no new dependency, custom mail protocol or live infrastructure is introduced.
+The implementation reuses Net::Blossom’s SQLite byte and metadata stores on the
+same DBI handle, alongside the existing DBD::SQLite, Moo and value objects. No
+custom mail protocol or live infrastructure is introduced.
 See [local storage](local-storage.md) for SQLite durability assumptions and
 [the original contracts](architecture.md) for production work still required.
 

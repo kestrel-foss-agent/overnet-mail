@@ -1,7 +1,8 @@
 # Local storage foundation
 
 This is an embedded, trusted-caller prototype, not a running mail service.
-`Overnet::Mail::Store` uses DBI and DBD::SQLite. SQLite is the sole authority for
+`Overnet::Mail::Store` composes Net::Blossom’s SQLite BlobStore and MetadataStore
+on one DBI/DBD::SQLite handle. SQLite is the sole authority for
 this prototype's accepted messages, exact content and private envelopes. The
 [explicit transactional outbox](transactional-outbox.md) uses the same authority.
 There is no Dovecot store, IMAP adapter, network delivery worker or independently
@@ -11,13 +12,16 @@ server. Do not add two competing authorities for membership or flags.
 
 ## Atomic acceptance and identity
 
-One database transaction inserts the BLOB, logical message record and ordered
+One database transaction inserts Blossom byte and metadata rows, the logical
+message record and ordered
 private envelope recipients. `accept_item` archives only. `enqueue_submission`
 explicitly adds the submission and all recipient queue records to that same
 transaction. The method returns a receipt only after commit.
-There is no separate blob-file write/rename to coordinate with SQL. The schema
+Blossom stages an upload in a private temporary file, then prepares its bytes
+inside the same database transaction. The file is not authoritative and is
+removed after commit or rollback. See [the staging and cleanup limits](blossom-storage.md). The schema
 version and application ID reject unrecognized database markers; no migrations
-are attempted; schema version 2 rejects existing version-1 files without changing
+are attempted; schema version 3 rejects existing version-1 and version-2 files without changing
 their data. Opening is not a full schema/integrity audit of an existing file.
 
 The identities deliberately have different meanings:
@@ -39,8 +43,7 @@ and recipient array; it is an internal integrity/replay check, not a wire format
 
 Inbound `RawMessage` is opaque and has no invented envelope. A `Submission`
 stores finalized outbound bytes plus its existing private Envelope separately.
-No method parses/reconstructs MIME or changes accepted bytes. BLOB binding is
-explicit, preserving NULs, high bytes, MIME encodings and all newlines. Every
+No method parses/reconstructs MIME or changes accepted bytes. Blossom explicitly stores bytes as SQLite BLOB values, preserving NULs, high bytes, MIME encodings and all newlines. Every
 content read or reuse verifies stored type, byte length and SHA-256. Replays also
 verify the envelope fingerprint; missing/corrupt content is an error, not success.
 Fingerprints detect accidental inconsistency, not malicious tampering by an
@@ -75,7 +78,7 @@ This contract requires a supported local SQLite filesystem. It does not cover
 network filesystems, lying storage flushes, hardware damage or host power-loss
 certification. EXTRA is used because SQLite documents the directory sync needed
 for DELETE-journal commit durability. Tests interrupt the application process
-at insert and commit boundaries and check recovery; they are not simulated
+at both Blossom inserts, mail inserts and commit boundaries and check recovery; they are not simulated
 physical power cuts. After an ambiguous interruption, replay the original key.
 A commit followed by loss of its acknowledgement still resolves to one record.
 
@@ -83,7 +86,7 @@ A commit followed by loss of its acknowledgement still resolves to one record.
 
 SQLite owns rollback-journal recovery. Exception tests fail a recipient insertion
 and a commit, ensuring BLOB/message/recipient rows disappear together. Subprocess
-tests terminate without disconnect after BLOB, message and recipient insertion,
+tests terminate without disconnect after Blossom byte/metadata, message and recipient insertion,
 and during the commit hook, then reopen and retry. A post-commit process exit
 tests acknowledgement loss. Corruption fixtures cover missing BLOBs, wrong type,
 length/content changes and envelope changes; no automatic repair is attempted.
@@ -102,6 +105,11 @@ backup/restore tooling and production operations. No compatibility-matrix row
 is marked end-to-end verified by this storage unit-test suite.
 
 ## Established dependencies and sources
+
+- [Net::Blossom SQLite components](https://github.com/NicholasBHubbard/Net-Blossom/tree/084c7db09465f3470fec9748b4e467bea5f567f9/dist/Net-Blossom-Server-Backend-SQLite)
+  provide the shared blob byte/metadata infrastructure; mail controls one
+  transaction across those components and its own domain tables
+- Net::Blossom uses GPL-3.0 terms, compatible with this distribution
 
 - [DBI](https://metacpan.org/pod/DBI) provides database handles, bound statements
   and transactions; [DBD::SQLite](https://metacpan.org/pod/DBD::SQLite) provides

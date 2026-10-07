@@ -11,7 +11,8 @@ for my $path (@workflows) {
     next if $line !~ /\buses:\s*(\S+)/;
     like $1, qr{\A[\w.-]+/[\w./-]+\@[a-f0-9]{40}\z}, "$path pins every external action by full SHA";
   }
-  unlike $source, qr/pull_request_target/, "$path never runs PR code with privileged triggers";
+  like $source,   qr/sudo apt-get install -y libgmp-dev/, "$path installs the native Blossom dependency prerequisite";
+  unlike $source, qr/pull_request_target/,                "$path never runs PR code with privileged triggers";
 }
 my $ci = slurp('.github/workflows/perl-tests.yml');
 like $ci, qr/^  push:\s*\n  pull_request:/m, 'feature branch pushes run CI before a PR is opened';

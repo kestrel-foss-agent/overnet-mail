@@ -8,6 +8,7 @@ requires 'DBI', '1.643';
 requires 'DBD::SQLite', '1.72';
 requires 'JSON', '4.10';
 requires 'Net::SMTP', '3.15';
+requires 'Net::Blossom::Server::Backend::SQLite', '0.001004';
 
 on 'configure' => sub {
   requires 'ExtUtils::MakeMaker', '7.10';

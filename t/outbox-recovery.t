@@ -2,6 +2,7 @@ use strictures 2;
 
 use Config;
 use DBI         qw(SQL_BLOB);
+use File::Copy  qw(copy);
 use File::Temp  qw(tempdir);
 use JSON        ();
 use Digest::SHA qw(sha256_hex);
@@ -9,26 +10,28 @@ use POSIX       ();
 use Test2::V0;
 use Overnet::Mail::Store;
 
-my $dir        = tempdir(CLEANUP => 1);
+my $dir = tempdir(CLEANUP => 1);
+local $ENV{TMPDIR} = $dir;
 my $raw        = Overnet::Mail::RawMessage->new(raw_bytes => "Subject: recovery\r\n\r\n" . ("\0\xff" x 50_000));
 my $submission = Overnet::Mail::Submission->new(
   message  => $raw,
   envelope => Overnet::Mail::Envelope->new(sender => q{}, recipients => ['blind@example.test', 'blind@example.test'])
 );
 
-for my $table (qw(contents messages recipients submissions deliveries)) {
+for my $table (qw(blossom_blob_data blossom_blobs messages recipients submissions deliveries)) {
   my $store = Overnet::Mail::Store->new(path => "$dir/failure-$table.db");
   my $when  = $table eq 'deliveries' ? 'WHEN NEW.position = 1' : q{};
   $store->_dbh->do(
 "CREATE TEMP TRIGGER fail_insert BEFORE INSERT ON $table $when BEGIN SELECT RAISE(ABORT, 'blind\@example.test secret'); END"
   );
   my $error = dies { enqueue($store) };
-  like $error,   qr/database operation failed/, 'insert failure aborts enqueue';
-  unlike $error, qr/blind\@|secret/,            'failure hides recipient and trigger details';
-  is counts($store), [0, 0, 0, 0, 0], 'acceptance and complete recipient queue roll back together';
+  like $error, $table =~ /\Ablossom_/ ? qr/blob operation failed/ : qr/database operation failed/,
+    'insert failure aborts enqueue';
+  unlike $error, qr/blind\@|secret/, 'failure hides recipient and trigger details';
+  is counts($store), [0, 0, 0, 0, 0, 0], 'acceptance and complete recipient queue roll back together';
   $store->_dbh->do('DROP TRIGGER fail_insert');
   ok enqueue($store), 'same key succeeds after failure';
-  is counts($store), [1, 1, 2, 1, 2], 'successful retry has exactly one queue';
+  is counts($store), [1, 1, 1, 2, 1, 2], 'successful retry has exactly one queue';
   $store->disconnect;
 }
 my $store = Overnet::Mail::Store->new(path => "$dir/commit.db");
@@ -37,7 +40,7 @@ my $store = Overnet::Mail::Store->new(path => "$dir/commit.db");
   like dies { enqueue($store) }, qr/commit interrupted/, 'enqueue returns no receipt when commit fails';
 }
 $store->_dbh->{Callbacks} = {};
-is counts($store), [0, 0, 0, 0, 0], 'failed commit rolls back queue and message together';
+is counts($store), [0, 0, 0, 0, 0, 0], 'failed commit rolls back queue and message together';
 my $receipt = enqueue($store);
 {
   local $store->_dbh->{Callbacks} = {commit => sub { die "commit interrupted\n" }};
@@ -73,7 +76,7 @@ $store->_dbh->do(
 q{CREATE TEMP TRIGGER fail_delivery BEFORE INSERT ON deliveries WHEN NEW.position = 1 BEGIN SELECT RAISE(ABORT, 'failed'); END}
 );
 like dies { enqueue($store) }, qr/database operation failed/, 'promotion failure reported';
-is counts($store), [1, 1, 2, 0, 0], 'failed promotion retains archive with no partial queue';
+is counts($store), [1, 1, 1, 2, 0, 0], 'failed promotion retains archive with no partial queue';
 $store->_dbh->do('DROP TRIGGER fail_delivery');
 ok enqueue($store), 'explicit promotion can retry';
 
@@ -155,11 +158,67 @@ is $dbh->selectall_arrayref('SELECT * FROM recipients ORDER BY position'),
   [[1, 0, 'blind@example.test'], [1, 1, 'blind@example.test']], 'rejection preserves private recipients';
 $dbh->disconnect;
 
+# Version 2's archived content and live/settled outbox also remain untouched.
+my $legacy_two = "$dir/version-two.db";
+copy($legacy, $legacy_two) or die 'legacy fixture copy failed';
+$dbh = DBI->connect("dbi:SQLite:dbname=$legacy_two", q{}, q{}, {RaiseError => 1});
+$dbh->do(<<'SUBMISSIONS');
+CREATE TABLE submissions (
+      submission_id INTEGER PRIMARY KEY AUTOINCREMENT,
+      message_id INTEGER NOT NULL UNIQUE REFERENCES messages(message_id)
+)
+SUBMISSIONS
+$dbh->do(<<'DELIVERIES');
+CREATE TABLE deliveries (
+      delivery_id INTEGER PRIMARY KEY AUTOINCREMENT,
+      message_id INTEGER NOT NULL REFERENCES submissions(message_id),
+      position INTEGER NOT NULL,
+      state TEXT NOT NULL DEFAULT 'ready'
+        CHECK(state IN ('ready', 'leased', 'deferred', 'uncertain', 'delivered', 'failed', 'exhausted')),
+      attempt INTEGER NOT NULL DEFAULT 0 CHECK(attempt BETWEEN 0 AND 5),
+      next_attempt_at INTEGER NOT NULL DEFAULT 0 CHECK(next_attempt_at >= 0),
+      lease_until INTEGER,
+      uncertain_attempts INTEGER NOT NULL DEFAULT 0 CHECK(uncertain_attempts BETWEEN 0 AND attempt),
+      last_outcome TEXT CHECK(last_outcome IN ('confirmed', 'transient', 'permanent', 'uncertain', 'lease_expired')),
+      UNIQUE(message_id, position),
+      FOREIGN KEY(message_id, position) REFERENCES recipients(message_id, position),
+      CHECK((state = 'leased' AND lease_until IS NOT NULL AND lease_until >= 0 AND attempt > 0)
+        OR (state != 'leased' AND lease_until IS NULL)),
+      CHECK(state NOT IN ('ready', 'deferred', 'uncertain') OR attempt < 5)
+)
+DELIVERIES
+$dbh->do('CREATE INDEX deliveries_due ON deliveries(state, next_attempt_at, delivery_id)');
+$dbh->do('INSERT INTO submissions (message_id) VALUES (1)');
+$dbh->do(
+q{INSERT INTO deliveries (message_id, position, state, attempt, last_outcome) VALUES (1, 0, 'delivered', 1, 'confirmed')}
+);
+$dbh->do(
+q{INSERT INTO deliveries (message_id, position, state, attempt, lease_until, uncertain_attempts, last_outcome) VALUES (1, 1, 'leased', 2, 500, 1, 'lease_expired')}
+);
+$dbh->do('PRAGMA user_version = 2');
+my $v2_schema_before = $dbh->selectall_arrayref('SELECT * FROM sqlite_master ORDER BY name');
+my %v2_rows_before   = map { $_ => $dbh->selectall_arrayref("SELECT * FROM $_ ORDER BY rowid") }
+  qw(contents messages recipients submissions deliveries sqlite_sequence);
+$dbh->disconnect;
+like dies { Overnet::Mail::Store->new(path => $legacy_two) }, qr/unsupported mail store schema/,
+  'version-two outbox cannot be implicitly migrated or enqueued';
+$dbh = DBI->connect("dbi:SQLite:dbname=$legacy_two", q{}, q{}, {RaiseError => 1});
+is $dbh->selectrow_array('PRAGMA user_version'),   2,             'rejection preserves version-two schema marker';
+is $dbh->selectrow_array('PRAGMA application_id'), 1_330_463_049, 'rejection preserves version-two application marker';
+is $dbh->selectall_arrayref('SELECT * FROM sqlite_master ORDER BY name'), $v2_schema_before,
+  'rejection preserves the complete version-two schema';
+
+for my $table (sort keys %v2_rows_before) {
+  is $dbh->selectall_arrayref("SELECT * FROM $table ORDER BY rowid"), $v2_rows_before{$table},
+    "version-two rejection preserves $table rows exactly";
+}
+$dbh->disconnect;
+
 SKIP: {
-  skip 'fork unavailable on this platform', 37 if !$Config{d_fork};
+  skip 'fork unavailable on this platform', 40 if !$Config{d_fork};
 
   # No live parent connection crosses fork. Interruption occurs before disconnect/rollback.
-  for my $stage (qw(contents messages recipients submissions deliveries commit)) {
+  for my $stage (qw(blossom_blob_data blossom_blobs messages recipients submissions deliveries commit)) {
     my $file    = "$dir/crash-$stage.db";
     my $initial = Overnet::Mail::Store->new(path => $file);
     $initial->disconnect;
@@ -182,7 +241,7 @@ SKIP: {
     waitpid $pid, 0;
     is $? >> 8, 71, "process interrupted at $stage";
     my $reopened = Overnet::Mail::Store->new(path => $file);
-    is counts($reopened), [0, 0, 0, 0, 0], 'unacknowledged pre-commit queue fully rolls back';
+    is counts($reopened), [0, 0, 0, 0, 0, 0], 'unacknowledged pre-commit queue fully rolls back';
     ok enqueue($reopened), 'interrupted enqueue can be retried with same key';
     $reopened->disconnect;
   }
@@ -272,7 +331,7 @@ SKIP: {
   is [sort { $a <=> $b } @statuses], [0, 0, 0, 0, 1, 2],
     'racing enqueue and claims produce exactly one lease for each recipient';
   my $reopened = Overnet::Mail::Store->new(path => $file);
-  is counts($reopened), [1, 1, 2, 1, 2], 'concurrent idempotent enqueues create one queue';
+  is counts($reopened), [1, 1, 1, 2, 1, 2], 'concurrent idempotent enqueues create one queue';
   my $reclaimed = $reopened->claim_delivery(mailbox_id => 'box', now => 1, lease_seconds => 1);
   is $reclaimed->{attempt},            2, 'post-crash lease can be reclaimed once';
   is $reclaimed->{uncertain_attempts}, 1, 'reclaim preserves unknown outcome';
@@ -300,5 +359,5 @@ sub finish {
 sub counts {
   my ($storage) = @_;
   return [map { $storage->_dbh->selectrow_array("SELECT COUNT(*) FROM $_") }
-      qw(contents messages recipients submissions deliveries)];
+      qw(blossom_blob_data blossom_blobs messages recipients submissions deliveries)];
 }
