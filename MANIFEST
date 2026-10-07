@@ -81,3 +81,6 @@ docs/local-storage.md
 lib/Overnet/Mail/Store.pm
 t/store.t
 t/store-recovery.t
+docs/transactional-outbox.md
+t/outbox.t
+t/outbox-recovery.t

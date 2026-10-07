@@ -3,8 +3,9 @@
 A Perl email application built around ordinary Internet email compatibility.
 
 **Status: development, no running mail service.** The CI foundation is followed
-by immutable message/envelope objects and a small SQLite local-storage prototype.
-SMTP, authentication, outbox and delivery services are not implemented or deployed.
+by immutable message/envelope objects, SQLite local storage and an explicit
+transactional per-recipient outbox. SMTP, authentication and network delivery
+services are not implemented or deployed.
 
 The value objects preserve raw message octets and content hashes, keep the private
 envelope independent of visible headers, and reject Bcc/Resent-Bcc in finalized
@@ -53,8 +54,9 @@ Never copy another project's mutation-survivor allowlist.
 See [the local storage contract](docs/local-storage.md),
 [initial contracts](docs/architecture.md) and
 [compatibility acceptance matrix](docs/compatibility.md). Local acceptance is now
-transactional; authentication and a per-recipient outbox remain next, followed by
-tested native and Internet interoperability. Reuse maintained CPAN libraries and
+transactional, with a [bounded per-recipient outbox](docs/transactional-outbox.md).
+Authentication and mature transport adapters remain next, followed by tested
+native and Internet interoperability. Reuse maintained CPAN libraries and
 existing MTA and mailbox servers instead of implementing their protocols from scratch.
 
 ## License
