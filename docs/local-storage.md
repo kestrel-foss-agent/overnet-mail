@@ -2,19 +2,23 @@
 
 This is an embedded, trusted-caller prototype, not a running mail service.
 `Overnet::Mail::Store` uses DBI and DBD::SQLite. SQLite is the sole authority for
-this prototype's accepted messages, exact content and private envelopes. There
-is no Dovecot store, IMAP adapter, delivery worker or independently authoritative
-copy. Before ordinary-client access is implemented, the adapter must use this
+this prototype's accepted messages, exact content and private envelopes. The
+[explicit transactional outbox](transactional-outbox.md) uses the same authority.
+There is no Dovecot store, IMAP adapter, network delivery worker or independently
+authoritative copy. Before ordinary-client access is implemented, the adapter must use this
 same authority or an explicit migration must replace it with a mature mailbox
 server. Do not add two competing authorities for membership or flags.
 
 ## Atomic acceptance and identity
 
 One database transaction inserts the BLOB, logical message record and ordered
-private envelope recipients. The method returns a receipt only after commit.
+private envelope recipients. `accept_item` archives only. `enqueue_submission`
+explicitly adds the submission and all recipient queue records to that same
+transaction. The method returns a receipt only after commit.
 There is no separate blob-file write/rename to coordinate with SQL. The schema
 version and application ID reject unrecognized database markers; no migrations
-are attempted. Opening is not a full schema/integrity audit of an existing file.
+are attempted; schema version 2 rejects existing version-1 files without changing
+their data. Opening is not a full schema/integrity audit of an existing file.
 
 The identities deliberately have different meanings:
 
@@ -22,8 +26,8 @@ The identities deliberately have different meanings:
 - `content_sha256` identifies the exact original bytes for internal BLOB sharing
 - `(mailbox_id, idempotency_key)` identifies one caller acceptance request
 - RFC Message-ID remains opaque content and does not deduplicate anything
-- Delivery IDs do not exist yet; future outbox IDs must remain separate from all
-  of the above, including per-recipient state and transport attempt identity
+- `enqueue_submission` adds separate submission and per-recipient delivery IDs;
+  each claim has a distinct attempt number for fencing local completion
 
 The same content with different idempotency keys creates separate logical
 records. Retrying the same key in the same mailbox returns the original receipt
@@ -93,7 +97,7 @@ garbage-collects blobs, so orphan reconciliation and retention need an explicit
 future maintenance contract.
 
 Still absent: authentication/authorization, relay policy, quotas, mailbox flags
-and listing, transactional outbox, delivery retries/bounces, SMTP/IMAP/JMAP,
+and listing, network delivery/bounces, SMTP/IMAP/JMAP,
 backup/restore tooling and production operations. No compatibility-matrix row
 is marked end-to-end verified by this storage unit-test suite.
 
