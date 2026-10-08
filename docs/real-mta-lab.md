@@ -64,7 +64,8 @@ A failed engine job blocks the milestone even if the ordinary suite passes.
 
 - Perl official image: `perl:5.40.1-bookworm` (Debian 12 / Perl 5.40.1)
 - Debian package indexes: immutable snapshot `20260901T000000Z`, including the
-  Debian security archive; Postfix 3.7 and Dovecot 2.3 configuration families
+  Debian security archive; verified packages Postfix `3.7.11-0+deb12u1` and
+  Dovecot `1:2.3.19.1+dfsg1-2.1+deb12u6`
 - CPAN IMAP client: `Mail::IMAPClient` 3.43
 - Application dependencies: repository `cpanfile` and existing minimum versions
 

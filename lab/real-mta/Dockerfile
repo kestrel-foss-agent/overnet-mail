@@ -17,7 +17,8 @@ RUN cpanm --installdeps . && cpanm Mail::IMAPClient@3.43 \
  && cp lab/real-mta/main.cf lab/real-mta/master.cf /etc/postfix/ \
  && cp lab/real-mta/dovecot.conf /etc/dovecot/dovecot.conf \
  && cp lab/real-mta/users /etc/dovecot/lab-users \
- && chmod 600 /etc/dovecot/lab-users \
+ && chown root:dovecot /etc/dovecot/lab-users \
+ && chmod 640 /etc/dovecot/lab-users \
  && cp lab/real-mta/recipients /etc/postfix/lab-recipients \
  && postmap /etc/postfix/lab-recipients \
  && mkdir /lab && cp lab/real-mta/control /lab/control && chmod 755 /lab/control \

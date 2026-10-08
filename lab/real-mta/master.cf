@@ -1,5 +1,6 @@
 # All listeners are loopback; no SMTP Internet client transport is registered.
 127.0.0.1:2525 inet n - n - - smtpd
+showq     unix n - n - - showq
 pickup    unix n - n 60 1 pickup
 cleanup   unix n - n - 0 cleanup
 qmgr      unix n - n 1 1 qmgr
