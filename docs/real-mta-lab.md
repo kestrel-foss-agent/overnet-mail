@@ -53,6 +53,8 @@ they refuse to operate without the disposable image markers. Tests restart the
 services without replacing their spool or mailbox directories. This demonstrates
 service/process restart persistence, **not disk-loss or power-failure durability**.
 
+Service startup redirects daemon standard streams to a private container log,
+printed during cleanup, so restarts cannot keep the TAP harness pipe open.
 Startup polls have a five-second bound; service commands have ten-second bounds.
 The suite has a 180-second timeout and the outer container has a 240-second
 bound with forced cleanup. Image build is bounded to 20 minutes. CI's required

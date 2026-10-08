@@ -16,10 +16,10 @@ wait_port() {
   return 1
 }
 case "${1:-}" in
-  postfix-start) timeout 10 postfix start; wait_port 2525 up ;;
+  postfix-start) timeout 10 postfix start </dev/null >>/lab/services.log 2>&1; wait_port 2525 up ;;
   postfix-stop) timeout 10 postfix stop; wait_port 2525 down ;;
   postfix-flush) timeout 10 postfix flush ;;
-  dovecot-start) timeout 10 dovecot; wait_port 1143 up; wait_port 2424 up ;;
+  dovecot-start) timeout 10 dovecot </dev/null >>/lab/services.log 2>&1; wait_port 1143 up; wait_port 2424 up ;;
   dovecot-stop) timeout 10 doveadm stop; wait_port 1143 down; wait_port 2424 down ;;
   queue-json) timeout 10 postqueue -j ;;
   stop)
@@ -27,7 +27,15 @@ case "${1:-}" in
     /lab/control dovecot-stop || true
     ;;
   check)
-    trap '/lab/control stop' EXIT
+    finish() {
+      local status=$?
+      /lab/control stop
+      cat /lab/services.log
+      exit "$status"
+    }
+    trap finish EXIT
+    # Restarted daemons must never retain the test harness's TAP output pipe.
+    touch /lab/services.log
     cat /lab/versions.txt
     perl -V:version
     # A runtime network namespace must have no non-loopback interfaces or route.
