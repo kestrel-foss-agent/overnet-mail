@@ -22,6 +22,7 @@ on 'test' => sub {
 };
 
 on 'develop' => sub {
+  requires 'Mail::IMAPClient', '3.43';
   requires 'Devel::Cover';
   requires 'Devel::Mutator';
   requires 'Perl::Critic';

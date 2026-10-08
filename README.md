@@ -77,6 +77,9 @@ transactional, with a [bounded per-recipient outbox](docs/transactional-outbox.m
 A [local SMTP adapter](docs/local-smtp-adapter.md) now tests the handoff boundary
 using Net::SMTP. A [one-shot delivery runner](docs/local-delivery-runner.md) joins
 that adapter to the durable outbox with explicit crash and completion ambiguity.
+An [isolated real-MTA lab](docs/real-mta-lab.md) exercises Postfix custody and
+Dovecot as an external synthetic reference recipient, retrieved through IMAP.
+It does not introduce an Overnet mailbox backend or deploy a mail service.
 Authentication and production transport adapters remain next, followed by tested
 native and Internet interoperability. Reuse maintained CPAN libraries and
 existing MTA and mailbox servers instead of implementing their protocols from scratch.

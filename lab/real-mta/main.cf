@@ -1,0 +1,36 @@
+compatibility_level = 3.6
+myhostname = custody.reference.invalid
+mydomain = reference.invalid
+myorigin = $mydomain
+inet_interfaces = 127.0.0.1
+inet_protocols = ipv4
+mydestination =
+mynetworks =
+relay_domains =
+virtual_mailbox_domains = reference.invalid
+virtual_mailbox_maps = hash:/etc/postfix/lab-recipients
+virtual_transport = lmtp:inet:127.0.0.1:2424
+# No permit_mynetworks shortcut, including for loopback.
+smtpd_relay_restrictions = reject_unauth_destination
+smtpd_recipient_restrictions = reject_unlisted_recipient
+smtpd_reject_unlisted_recipient = yes
+smtpd_delay_reject = yes
+smtpd_sasl_auth_enable = no
+smtpd_tls_security_level = none
+smtp_dns_support_level = disabled
+smtp_host_lookup = native
+# No Internet transport exists, even if routing is misconfigured.
+default_transport = error:external delivery disabled in synthetic lab
+relay_transport = error:relay disabled in synthetic lab
+message_size_limit = 65536
+mailbox_size_limit = 0
+recipient_delimiter =
+smtputf8_enable = no
+biff = no
+append_dot_mydomain = no
+queue_run_delay = 1s
+minimal_backoff_time = 1s
+maximal_backoff_time = 5s
+maximal_queue_lifetime = 1h
+bounce_queue_lifetime = 1h
+maillog_file = /dev/stdout

@@ -1,0 +1,2 @@
+alice@reference.invalid:{PLAIN}lab-only:5000:5000::/var/lib/reference-mail/alice::
+blind@reference.invalid:{PLAIN}lab-only:5000:5000::/var/lib/reference-mail/blind::
