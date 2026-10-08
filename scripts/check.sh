@@ -12,11 +12,11 @@ case "${1:-all}" in
     perl -MPerl::Critic::Policy::Overnet::RequireStrictures2 -MPerl::Critic::Policy::Overnet::RequireTest2InTests -e 1
     # Explicit paths prevent an existing blib/ from shadowing source checks.
     perlcritic --profile .perlcriticrc --severity 1 --only lib
-    perlcritic --profile .perlcriticrc --single-policy Overnet::RequireTest2InTests t xt/author
+    perlcritic --profile .perlcriticrc --single-policy Overnet::RequireTest2InTests t xt/author xt/integration
     prove -rlv xt/author
     # These exercise positive and negative custom-policy behavior.
     (cd vendor/overnet-perl-style && prove -rlv t)
-    bash -n scripts/install-deps.sh scripts/check.sh
+    bash -n scripts/*.sh lab/real-mta/control
     ;;
   coverage)
     # The shared template skips if its dependency is missing. CI must fail.

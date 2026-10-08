@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# This script can operate only inside the disposable image, never on the host.
+[[ ${OVERNET_REAL_MTA_LAB:-} == 1 && -f /lab/versions.txt && -f /.dockerenv ]] || exit 2
+wait_port() {
+  local port=$1 state=$2
+  for ((attempt=0; attempt<50; attempt++)); do
+    if ss -ltnH "sport = :$port" | grep -q .; then
+      [[ $state == up ]] && return 0
+    else
+      [[ $state == down ]] && return 0
+    fi
+    sleep .1
+  done
+  echo "Listener $port failed to become $state" >&2
+  return 1
+}
+case "${1:-}" in
+  postfix-start) timeout 10 postfix start; wait_port 2525 up ;;
+  postfix-stop) timeout 10 postfix stop; wait_port 2525 down ;;
+  postfix-flush) timeout 10 postfix flush ;;
+  dovecot-start) timeout 10 dovecot; wait_port 1143 up; wait_port 2424 up ;;
+  dovecot-stop) timeout 10 doveadm stop; wait_port 1143 down; wait_port 2424 down ;;
+  queue-json) timeout 10 postqueue -j ;;
+  stop)
+    /lab/control postfix-stop || true
+    /lab/control dovecot-stop || true
+    ;;
+  check)
+    trap '/lab/control stop' EXIT
+    cat /lab/versions.txt
+    perl -V:version
+    # A runtime network namespace must have no non-loopback interfaces or route.
+    [[ $(ls /sys/class/net) == lo ]]
+    [[ -z $(ip route show) ]]
+    timeout 10 postfix check
+    timeout 10 doveconf -n
+    /lab/control dovecot-start
+    /lab/control postfix-start
+    ss -ltn
+    # Fail if any TCP listener binds somewhere other than IPv4 loopback.
+    ! ss -ltnH | awk '{print $4}' | grep -v '^127\.0\.0\.1:'
+    timeout --kill-after=10s 180s prove -Ilib -v xt/integration/real-mta.t
+    ;;
+  *) echo 'Usage: control check|stop|postfix-start|postfix-stop|postfix-flush|dovecot-start|dovecot-stop|queue-json' >&2; exit 2 ;;
+esac
