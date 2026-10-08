@@ -110,3 +110,8 @@ xt/author/perlcritic.t
 xt/author/pod-coverage.t
 xt/author/pod-syntax.t
 xt/integration/real-mta.t
+lib/Overnet/Mail/Transport/Attempt.pm
+t/smtp-attempt-unit.t
+t/smtp-deadline.t
+t/smtp-exchange.t
+t/smtp-syscalls.t

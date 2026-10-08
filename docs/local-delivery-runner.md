@@ -100,10 +100,13 @@ At exact lease expiry, completion fails. A newer worker's recorded result cannot
 be overwritten by an older worker finishing late, even if the older worker also
 observed 250. Fencing protects database writes only: it cannot recall bytes sent
 to an MTA. The pre-send time check narrows an obvious stale-send window but does
-not close the race or stop an in-flight slow-drip peer. Net::SMTP's timeout is
-per I/O, not a total attempt deadline. There is no supervisor or whole-call time
-bound. This is an explicit production blocker, not a reason to lengthen a lease
-and claim the problem solved.
+not close the race. The adapter now has an independent total SMTP I/O budget
+(`attempt_seconds`, default 10); see its [deadline contract](local-smtp-adapter.md#total-smtp-attempt-deadline).
+This does not derive a budget from the lease or alter existing short-lease
+behavior. Callers must size leases for that budget plus claim, validation,
+scheduling and settlement margins. A short lease can expire during the bounded
+exchange, and a parent crash can lose acceptance evidence. Lease-aware scheduling
+and supervision remain separate production work.
 
 Clocks must return integer Unix seconds in Store's supported range and remain
 trusted, consistent and nondecreasing across workers and calls. This runner checks
@@ -121,8 +124,8 @@ source-distribution gates apply. Process exits are not power-loss certification.
 
 Existing mature MTAs must own downstream routing, retries and DSN processing;
 accepted MTA custody must not be retried merely because recipient delivery is not
-yet known. A production worker needs a separately reviewed total-attempt execution
-bound, supervision, scheduling, authorization, authenticated verified TLS as
+yet known. A production worker still needs a separately reviewed lease-aware execution
+contract, supervision, scheduling, authorization, authenticated verified TLS as
 applicable, and actual MTA/client interoperability testing. This milestone neither
 implements nor certifies those boundaries. See the [SMTP adapter contract](local-smtp-adapter.md)
 and [outbox contract](transactional-outbox.md).

@@ -5,21 +5,24 @@ use Moo;
 
 use Carp         qw(croak);
 use Scalar::Util qw(blessed);
+use Time::HiRes  qw(clock_gettime CLOCK_MONOTONIC);
+use Overnet::Mail::Transport::Attempt;
 use Overnet::Mail::Envelope;
 use Overnet::Mail::Submission;
 use Overnet::Mail::Transport::SMTPClient;
 
 our $VERSION = '0.001';
 
-has port    => (is => 'ro', required => 1);
-has timeout => (is => 'ro', default  => sub { return 2 });
+has port            => (is => 'ro', required => 1);
+has timeout         => (is => 'ro', default  => sub { return 2 });
+has attempt_seconds => (is => 'ro', default  => sub { return 10 });
 
 sub BUILD {
   my ($self, $args) = @_;
   for my $key (keys %{$args}) {
-    croak 'unsupported loopback adapter option' if $key ne 'port' && $key ne 'timeout';
+    croak 'unsupported loopback adapter option' if $key ne 'port' && $key ne 'timeout' && $key ne 'attempt_seconds';
   }
-  for my $range (['port', 1_024, 65_535], ['timeout', 1, 30]) {
+  for my $range (['port', 1_024, 65_535], ['timeout', 1, 30], ['attempt_seconds', 1, 30]) {
     my ($name, $min, $max) = @{$range};
     my $value = $self->$name;
     if (!defined $value || ref $value || $value !~ /\A[1-9][0-9]{0,4}\z/smx || $value < $min || $value > $max) {
@@ -31,6 +34,7 @@ sub BUILD {
 
 sub deliver {
   my ($self, $claim) = @_;
+  my $deadline = clock_gettime(CLOCK_MONOTONIC) + $self->attempt_seconds;
   if (ref $claim ne 'HASH' || !blessed($claim->{message}) || !$claim->{message}->isa('Overnet::Mail::RawMessage')) {
     croak 'delivery requires a single-recipient claim with RawMessage';
   }
@@ -40,7 +44,14 @@ sub deliver {
   my $invalid = _wire_error($raw, $envelope);
   return _result('permanent', $invalid) if defined $invalid;
 
-  my $state = {stage => 'connect', uncertain => 0};
+  my $remaining = $deadline - clock_gettime(CLOCK_MONOTONIC);
+  return _result('transient', 'connect') if $remaining <= 0;
+  return Overnet::Mail::Transport::Attempt::run($deadline, sub { $self->_attempt($raw, $envelope, @_) });
+}
+
+sub _attempt {
+  my ($self, $raw, $envelope, $report) = @_;
+  my $state = {stage => 'connect', uncertain => 0, report => $report};
   my ($smtp, $result);
   local $SIG{PIPE} = 'IGNORE';
   my $ok = eval {
@@ -58,6 +69,8 @@ sub deliver {
   if (!$ok) {
     $result = _result($state->{uncertain} ? 'uncertain' : 'transient', $state->{stage});
   }
+
+  $report->($result);
 
   # Never QUIT/RSET a failed DATA stream: Net::Cmd may implicitly finish it.
   if ($smtp && defined fileno $smtp) {
@@ -86,31 +99,38 @@ sub _wire_error {
 sub _exchange {
   my ($smtp, $state, $raw, $envelope) = @_;
   return _failure($smtp, $state) if !$smtp->reply_complete || $smtp->code != 220;
-  $state->{stage} = 'hello';
+  _stage($state, 'hello');
   my $hello = $smtp->hello('fixture.invalid');
   return _failure($smtp, $state) if !$hello || !$smtp->reply_complete || $smtp->code != 250;
 
   my ($options, $invalid) = _mail_options($smtp, $raw);
   return $invalid if $invalid;
-  $state->{stage} = 'mail';
+  _stage($state, 'mail');
   my $mail = $smtp->mail($envelope->sender, %{$options});
   return _failure($smtp, $state) if !$mail || !$smtp->reply_complete || $smtp->code != 250;
 
-  $state->{stage} = 'recipient';
+  _stage($state, 'recipient');
   my $recipient = $smtp->recipient($envelope->recipients->[0]);
   return _failure($smtp, $state) if !$recipient || !$smtp->reply_complete || $smtp->code !~ /\A25[012]\z/smx;
 
-  $state->{stage} = 'data';
+  _stage($state, 'data');
   my $data = $smtp->data;
   return _failure($smtp, $state) if !$data || !$smtp->reply_complete || $smtp->code != 354;
 
-  $state->{stage}     = 'body';
+  _stage($state, 'body');
   $state->{uncertain} = 1;
   return _failure($smtp, $state) if !$smtp->datasend($raw);
-  $state->{stage} = 'final';
+  _stage($state, 'final');
   my $accepted = $smtp->dataend;
   return _failure($smtp, $state) if !$accepted || !$smtp->reply_complete || $smtp->code != 250;
   return _result('confirmed', 'final', 250);
+}
+
+sub _stage {
+  my ($state, $stage) = @_;
+  $state->{stage} = $stage;
+  $state->{report}->({stage => $stage});
+  return;
 }
 
 sub _mail_options {
@@ -178,7 +198,9 @@ Moo lifecycle callback validating configuration; do not call directly.
 
 Required C<port> is an integer from 1024 through 65535, selected by a local
 fixture using an ephemeral listener. Optional C<timeout> is 1 through 30 seconds,
-default 2, per library I/O wait, not a total operation or lease deadline.
+default 2, per library I/O wait. Optional C<attempt_seconds> is 1 through 30,
+default 10, for the total SMTP I/O attempt, including socket cleanup. The two
+limits are independent; the earlier bound wins. This is not a lease deadline.
 Unknown options are rejected. No host, credentials, TLS or debug options exist.
 
 =head2 port
@@ -188,6 +210,10 @@ Returns the explicitly selected local fixture port.
 =head2 timeout
 
 Returns the configured bounded library I/O timeout.
+
+=head2 attempt_seconds
+
+Returns the configured total SMTP attempt budget in seconds.
 
 =head2 deliver
 
@@ -211,7 +237,8 @@ The numeric IPv4 loopback destination and fixed greeting identity are hardcoded.
 
 =head1 DEPENDENCIES
 
-Perl 5.40, strictures 2, Moo, the existing value objects and Net::SMTP 3.15.
+Perl 5.40, strictures 2, Moo, the existing value objects, core process/timing
+modules and Net::SMTP 3.15. Tested on Linux; Unix fork/signals are required.
 
 =head1 INCOMPATIBILITIES
 
@@ -226,7 +253,9 @@ mail or expose to untrusted callers. A production adapter must fail closed on
 TLS certificate/hostname verification and authentication policy before sending
 credentials or message data. Existing MTAs must own Internet routing/retries;
 this adapter is not an Internet MTA. Uncertain outcomes may have been accepted;
-a retry can duplicate delivery. Per-I/O timeouts do not bound a slow-drip peer.
+a retry can duplicate delivery. A Unix child process bounds slow-drip I/O; see the
+adapter contract for process ownership, signal, preflight and timing limits.
+The caller must size its lease to include the attempt plus settlement margin.
 
 =head1 AUTHOR
 

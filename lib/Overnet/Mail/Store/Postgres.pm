@@ -182,7 +182,11 @@ must run in AutoCommit mode; this adapter never invokes them or their unbounded
 schema-lock wait. No SQLite C<path> is accepted. C<max_message_bytes> is inherited.
 
 The connection becomes exclusively owned by this Store, including error handling,
-encoding and disconnect. Do not share it, change its settings, or fork with it.
+encoding and disconnect. Do not share it or change its settings. Never use or
+run destructors on an inherited connection after fork. The LoopbackSMTP attempt
+child is a narrow exception to the no-fork rule: it never touches this handle,
+executes no inherited END/DESTROY callbacks, and terminates with C<POSIX::_exit>
+or a default-action signal. Its parent retains sole connection ownership.
 The current schema is captured at construction. Incomplete and foreign table
 sets, incompatible Blossom columns and constraints, and unknown mail schema
 versions are rejected. Mail tables and the version marker are initialized in one
