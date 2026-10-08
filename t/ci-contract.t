@@ -20,6 +20,9 @@ like $ci, qr/perl: \['5[.]40', 'latest'\]/,  'minimum and current stable Perl ar
 for my $gate (qw(test author coverage dist)) {
   like $ci, qr/\Qbash scripts\/check.sh $gate\E/, "$gate is required by CI";
 }
+like $ci, qr/image: postgres:17/,            'real PostgreSQL service is available to quality jobs';
+like $ci, qr/OVERNET_REQUIRE_POSTGRES: '1'/, 'PostgreSQL tests may not skip in CI';
+like $ci, qr/libpq-dev/,                     'native PostgreSQL driver prerequisite is installed';
 my $checks = slurp('scripts/check.sh');
 like $checks, qr/perl -e 'require Devel::Cover; require Devel::Cover::DB'/,
   'coverage dependency absence fails before template without starting instrumentation';

@@ -94,3 +94,7 @@ docs/local-delivery-runner.md
 t/delivery-runner-recovery.t
 docs/blossom-storage.md
 t/blossom-storage.t
+lib/Overnet/Mail/Store/Postgres.pm
+docs/postgresql-storage.md
+t/postgres-storage.t
+t/postgres-recovery.t
