@@ -36,12 +36,17 @@ my $store = Overnet::Mail::Store::Postgres->new(dbh => $dbh);
 
 Provisioning is a separate explicit administrative operation. Upstream metadata
 schema deployment uses AutoCommit and concurrent indexes; it cannot be nested
-in atomic mail initialization. Interrupted provisioning must be repaired by the
-administrator using the upstream deployment workflow before constructing the
-mail adapter. The adapter does not call upstream deployment or its unbounded
+in atomic mail initialization. Missing or incompatible tables/keys must be repaired by the administrator
+using the upstream deployment workflow before constructing the mail adapter.
+Owner lookup indexes are unused by mail and their completeness is not verified;
+finish upstream provisioning before using the same schema for Blossom owners. The adapter does not call upstream deployment or its unbounded
 schema-lock wait. It validates ordinary logged Blossom tables, required column
 shapes and keys, then atomically creates the mail tables and version marker.
 Unknown/incomplete table sets and unsupported schema versions fail closed.
+Views, foreign tables, partitioned tables and unlogged relations are rejected.
+On reopen, the adapter checks mail relation names/kinds and the version marker;
+it does not exhaustively fingerprint every mail column, index or constraint.
+Direct administrative schema modifications are outside the supported API.
 
 The caller transfers exclusive use of the DBI connection to the Store. Do not
 share it with another object, reuse it after `disconnect`, or inherit it across
@@ -52,7 +57,9 @@ mailbox-scoped queries are not authorization.
 
 Every mail operation, including reads, takes a transaction-level advisory lock
 with the fixed database-wide key 1330463049. Operations across different schemas
-also serialize. This deliberately preserves the proven bounded Store state
+also serialize. The captured application schema is first in the transaction
+search path and `pg_temp` is explicitly last, so temporary tables on a supplied
+handle cannot shadow the persistent mail or blob tables. This deliberately preserves the proven bounded Store state
 machine while PostgreSQL concurrency support develops; it is not a parallel
 queue-throughput implementation. Lock waits fail after 2500 ms; each statement
 is limited to 10000 ms. Callers may retry the original idempotency key after a
@@ -83,7 +90,9 @@ single `_blob_bytes` hook therefore reads `lo_get(body_oid)` through the same
 DBD::Pg handle, using PostgreSQL's public large-object API and ordinary bytea
 decoding. The common Store then verifies length, SHA-256 and exact accepted bytes
 before committing. All other upload/metadata lifecycle operations use public
-Net::Blossom methods, with no copied backend or private upstream call.
+Net::Blossom methods, with no copied backend or private upstream call. See
+[PostgreSQL large-object SQL functions](https://www.postgresql.org/docs/17/lo-funcs.html)
+and [search-path semantics](https://www.postgresql.org/docs/17/runtime-config-client.html#GUC-SEARCH-PATH).
 
 Staged uploads use upstream owner-only temporary files. Successful operations
 and ordinary exceptions clean them; hard process termination can leave a 0600

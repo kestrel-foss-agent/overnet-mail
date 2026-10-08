@@ -53,7 +53,7 @@ around _transaction => sub {
       $dbh->do(q{SET LOCAL synchronous_commit = 'on'});
       $dbh->do(q{SET LOCAL lock_timeout = '2500ms'});
       $dbh->do(q{SET LOCAL statement_timeout = '10000ms'});
-      $dbh->do('SET LOCAL search_path = ' . $dbh->quote_identifier($self->_schema) . ', pg_catalog');
+      $dbh->do('SET LOCAL search_path = ' . $dbh->quote_identifier($self->_schema) . ', pg_catalog, pg_temp');
 
       # One-key lock space is separate from Blossom's two-key content locks.
       $dbh->do('SELECT pg_advisory_xact_lock(1330463049::bigint)');
@@ -71,7 +71,7 @@ q{SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
     undef, $self->_schema
   );
   my $unsafe = $dbh->selectrow_array(
-q{SELECT COUNT(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = ? AND c.relpersistence != 'p'},
+q{SELECT COUNT(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = ? AND (c.relpersistence != 'p' OR c.relkind IN ('v', 'm', 'f', 'p'))},
     undef, $self->_schema
   );
   croak 'unsupported mail store durability' if $unsafe;
@@ -186,7 +186,9 @@ encoding and disconnect. Do not share it, change its settings, or fork with it.
 The current schema is captured at construction. Incomplete and foreign table
 sets, incompatible Blossom columns and constraints, and unknown mail schema
 versions are rejected. Mail tables and the version marker are initialized in one
-transaction; no migration is implemented.
+transaction; no migration is implemented. Owner lookup indexes are not checked
+because mail does not use Blossom owners. On reopen, mail relation names/kinds
+and version are checked, without an exhaustive column/constraint fingerprint.
 
 =head2 dbh
 

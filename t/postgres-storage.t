@@ -399,6 +399,51 @@ subtest 'transaction durability, bounded locks, and captured schema' => sub {
     'disconnected stores fail closed';
 };
 
+subtest 'temporary table names cannot shadow persistent mail custody' => sub {
+  my $fixture  = fixture('temp_shadow');
+  my $dbh      = $fixture->{dbh};
+  my @shadowed = qw(messages deliveries blossom_blob_data);
+  for my $table (@shadowed) {
+    my $name = $dbh->quote_identifier($table);
+    $dbh->do("CREATE TEMP TABLE $name (sentinel TEXT NOT NULL)");
+    my $temporary = $dbh->quote_identifier('pg_temp', $table);
+    $dbh->do("INSERT INTO $temporary (sentinel) VALUES (?)", undef, "untouched $table");
+  }
+
+  # The session omits pg_temp here, so PostgreSQL would otherwise give the
+  # temporary schema implicit first priority for relation name resolution.
+  my $store   = make_store($fixture);
+  my $raw     = raw("persistent despite temp shadows\0\xff\r\n");
+  my $item    = submission($raw, ['private@example.test']);
+  my $receipt = enqueue($store, $item);
+  is enqueue($store, $item), $receipt, 'temporary names cannot redirect same-key replay';
+  is $store->load(mailbox_id => 'box', message_id => $receipt->{message_id})->{message}->raw_bytes,
+    $raw->raw_bytes, 'mail reads persistent large-object mapping despite temporary shadow';
+  is stream_bytes($store->_blob_store->get_blob($raw->content_sha256)), $raw->raw_bytes,
+    'upstream schema-qualified cloned stream reads the persistent body';
+  is $store->_metadata_store->find_blob($raw->content_sha256)->{size}, $raw->size_bytes,
+    'upstream qualified metadata still identifies the persistent content';
+  my $claim = $store->claim_delivery(mailbox_id => 'box', now => 10);
+  is $claim->{delivery_id}, $receipt->{delivery_ids}->[0],          'claim finds the persistent delivery';
+  is finish($store, $claim, 11, 'confirmed')->{state}, 'delivered', 'settlement updates only the persistent delivery';
+  is $store->deliveries(mailbox_id => 'box', submission_id => $receipt->{submission_id})->[0]->{state},
+    'delivered', 'status resolves the durable queue with temporary names present';
+
+  for my $table (@shadowed) {
+    my $persistent = $dbh->quote_identifier($fixture->{schema}, $table);
+    my $temporary  = $dbh->quote_identifier('pg_temp',          $table);
+    is $dbh->selectrow_array("SELECT COUNT(*) FROM $persistent"), 1,
+      "one durable $table row exists in the application schema";
+    is $dbh->selectcol_arrayref("SELECT sentinel FROM $temporary"), ["untouched $table"],
+      "temporary $table sentinel remains untouched";
+  }
+  $store->disconnect;
+  $store = reopen($fixture);
+  is enqueue($store, $item), $receipt, 'receipt survives disconnect that destroys the temporary tables';
+  is $store->load(mailbox_id => 'box', message_id => $receipt->{message_id})->{message}->raw_bytes,
+    $raw->raw_bytes, 'persistent custody survives destruction of every temporary shadow';
+};
+
 subtest 'constructor arguments and schema selection are fail-closed' => sub {
   like dies { Overnet::Mail::Store::Postgres->new }, qr/dbh/, 'dbh is required';
   for my $bad (undef, [], {}, 'dbi:Pg:secret', raw('not a database')) {
@@ -520,6 +565,13 @@ subtest 'empty, partial, and unknown mail schema versions are rejected' => sub {
   for my $mutation (
     ['partial',       sub { $_[0]->do('DROP TABLE deliveries') }],
     ['mail_unlogged', sub { $_[0]->do('ALTER TABLE overnet_mail_schema SET UNLOGGED') }],
+    [
+      'mail_view',
+      sub {
+        $_[0]->do('DROP TABLE overnet_mail_schema');
+        $_[0]->do('CREATE VIEW overnet_mail_schema AS SELECT 1 AS version');
+      }
+    ],
     ['version_empty', sub { $_[0]->do('DELETE FROM overnet_mail_schema') }],
     [
       'version_unknown',
@@ -540,8 +592,23 @@ subtest 'empty, partial, and unknown mail schema versions are rejected' => sub {
     my $store   = make_store($fixture);
     $mutation->[1]->($fixture->{dbh});
     $store->disconnect;
-    like dies { reopen($fixture) }, qr/unsupported mail store (?:schema|durability)/,
-      'incomplete or unsupported mail schema has no implicit migration';
+    my $expected = $mutation->[0] eq 'mail_view'
+      || $mutation->[0] eq 'mail_unlogged' ? qr/unsupported mail store durability/ : qr/unsupported mail store schema/;
+    like dies { reopen($fixture) }, $expected, 'incomplete or unsupported mail schema has no implicit migration';
+    if ($mutation->[0] eq 'mail_view') {
+      is $fixture->{dbh}->selectrow_array('SELECT version FROM overnet_mail_schema'), 1,
+        'rejected marker view retains its original value';
+      is $fixture->{dbh}->selectrow_array(
+'SELECT c.relkind FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = ? AND c.relname = ?',
+        undef,
+        $fixture->{schema},
+        'overnet_mail_schema'
+        ),
+        'v',
+        'constructor does not replace or alter the rejected marker view';
+      ok $fixture->{dbh}->{AutoCommit}, 'rejected marker view leaves no initialization transaction active';
+    }
+
   }
 };
 
