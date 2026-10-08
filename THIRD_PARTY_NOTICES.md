@@ -41,3 +41,14 @@ commit `084c7db09465f3470fec9748b4e467bea5f567f9`.
 The mail adapter uses the public BlobStore/MetadataStore components rather than
 copying their backend infrastructure. Mail-specific policy and recovery guards
 remain in Overnet::Mail::Store. See `docs/blossom-storage.md`.
+
+The PostgreSQL adapter likewise uses Net::Blossom::Server::Backend::Postgres
+0.001004 as an external GPL-3.0 CPAN dependency; no backend implementation is
+vendored or copied. DBD::Pg 3.21.2 provides the PostgreSQL client interface.
+The adapter's same-transaction large-object read uses PostgreSQL's public
+`lo_get` function because upstream streaming readers clone their DBI handle.
+
+- PostgreSQL backend source: https://cpan.metacpan.org/authors/id/N/NH/NHUBBARD/Net-Blossom-Server-Backend-Postgres-0.001004.tar.gz
+- Archive SHA-256: `b753b532b6253ee07c1766c7df01b83ef3fbadbb0630f6aefbeb91715c9141b1`
+- DBD::Pg source: https://cpan.metacpan.org/authors/id/T/TU/TURNSTEP/DBD-Pg-3.21.2.tar.gz
+- Archive SHA-256: `d79179255ccb0c87b029db2eecaea56828e581255c48445d5fc0e79fa4e9245b`

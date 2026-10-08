@@ -28,13 +28,20 @@ has _metadata_store   => (is => 'ro', init_arg => undef);
 
 sub BUILD {
   my ($self) = @_;
-  my $path = $self->path;
-  if (!defined $path || ref $path || $path =~ /[;\x00-\x1f\x7f]/smx || !File::Spec->file_name_is_absolute($path)) {
-    croak 'path must be an absolute local filename without controls or semicolons';
-  }
   my $limit = $self->max_message_bytes;
   if (!defined $limit || ref $limit || $limit !~ /\A[1-9][0-9]*\z/smx) {
     croak 'max_message_bytes must be a positive integer';
+  }
+  $self->_open_storage;
+  $self->_transaction(sub { $self->_initialize; return 1 });
+  return;
+}
+
+sub _open_storage {
+  my ($self) = @_;
+  my $path = $self->path;
+  if (!defined $path || ref $path || $path =~ /[;\x00-\x1f\x7f]/smx || !File::Spec->file_name_is_absolute($path)) {
+    croak 'path must be an absolute local filename without controls or semicolons';
   }
   my $dbh = DBI->connect(
     "dbi:SQLite:dbname=$path",
@@ -61,7 +68,6 @@ sub BUILD {
   }
   $self->{_blob_store}     = Net::Blossom::Server::Backend::SQLite::BlobStore->new(dbh => $dbh);
   $self->{_metadata_store} = Net::Blossom::Server::Backend::SQLite::MetadataStore->new(dbh => $dbh);
-  $self->_transaction(sub { $self->_initialize; return 1 });
   return;
 }
 
@@ -77,10 +83,19 @@ sub _initialize {
   }
   $self->_blob_store->deploy_schema;
   $self->_metadata_store->deploy_schema;
+  $self->_deploy_mail_tables('INTEGER PRIMARY KEY AUTOINCREMENT', 'INTEGER');
+  $dbh->do('PRAGMA application_id = 1330463049');
+  $dbh->do('PRAGMA user_version = 3');
+  return;
+}
+
+sub _deploy_mail_tables {
+  my ($self, $primary_key, $integer) = @_;
+  my $dbh = $self->_dbh;
   for my $sql (
-    <<'MESSAGES',
+    <<"MESSAGES",
 CREATE TABLE messages (
-      message_id INTEGER PRIMARY KEY AUTOINCREMENT,
+      message_id $primary_key,
       mailbox_id TEXT NOT NULL,
       idempotency_key TEXT NOT NULL,
       content_sha256 TEXT NOT NULL REFERENCES blossom_blobs(sha256)
@@ -91,31 +106,31 @@ CREATE TABLE messages (
 )
 MESSAGES
     'CREATE INDEX messages_content ON messages(content_sha256)',
-    <<'RECIPIENTS',
+    <<"RECIPIENTS",
 CREATE TABLE recipients (
-      message_id INTEGER NOT NULL REFERENCES messages(message_id),
-      position INTEGER NOT NULL CHECK(position >= 0),
+      message_id $integer NOT NULL REFERENCES messages(message_id),
+      position $integer NOT NULL CHECK(position >= 0),
       address TEXT NOT NULL,
       PRIMARY KEY(message_id, position)
 )
 RECIPIENTS
-    <<'SUBMISSIONS',
+    <<"SUBMISSIONS",
 CREATE TABLE submissions (
-      submission_id INTEGER PRIMARY KEY AUTOINCREMENT,
-      message_id INTEGER NOT NULL UNIQUE REFERENCES messages(message_id)
+      submission_id $primary_key,
+      message_id $integer NOT NULL UNIQUE REFERENCES messages(message_id)
 )
 SUBMISSIONS
-    <<'DELIVERIES',
+    <<"DELIVERIES",
 CREATE TABLE deliveries (
-      delivery_id INTEGER PRIMARY KEY AUTOINCREMENT,
-      message_id INTEGER NOT NULL REFERENCES submissions(message_id),
-      position INTEGER NOT NULL,
+      delivery_id $primary_key,
+      message_id $integer NOT NULL REFERENCES submissions(message_id),
+      position $integer NOT NULL,
       state TEXT NOT NULL DEFAULT 'ready'
         CHECK(state IN ('ready', 'leased', 'deferred', 'uncertain', 'delivered', 'failed', 'exhausted')),
-      attempt INTEGER NOT NULL DEFAULT 0 CHECK(attempt BETWEEN 0 AND 5),
-      next_attempt_at INTEGER NOT NULL DEFAULT 0 CHECK(next_attempt_at >= 0),
-      lease_until INTEGER,
-      uncertain_attempts INTEGER NOT NULL DEFAULT 0 CHECK(uncertain_attempts BETWEEN 0 AND attempt),
+      attempt $integer NOT NULL DEFAULT 0 CHECK(attempt BETWEEN 0 AND 5),
+      next_attempt_at $integer NOT NULL DEFAULT 0 CHECK(next_attempt_at >= 0),
+      lease_until $integer,
+      uncertain_attempts $integer NOT NULL DEFAULT 0 CHECK(uncertain_attempts BETWEEN 0 AND attempt),
       last_outcome TEXT CHECK(last_outcome IN ('confirmed', 'transient', 'permanent', 'uncertain', 'lease_expired')),
       UNIQUE(message_id, position),
       FOREIGN KEY(message_id, position) REFERENCES recipients(message_id, position),
@@ -125,8 +140,6 @@ CREATE TABLE deliveries (
 )
 DELIVERIES
     'CREATE INDEX deliveries_due ON deliveries(state, next_attempt_at, delivery_id)',
-    'PRAGMA application_id = 1330463049',
-    'PRAGMA user_version = 3',
   ) {
     $dbh->do($sql);
   }
@@ -171,7 +184,7 @@ sub _accept_item {
     undef, $args->{mailbox_id}, $args->{idempotency_key},
     $sha,  $sender,             $signature,
   );
-  my $id       = $dbh->sqlite_last_insert_rowid;
+  my $id       = $self->_insert_id('messages', 'message_id');
   my $position = 0;
   for my $address (@{$recipients}) {
     $dbh->do('INSERT INTO recipients (message_id, position, address) VALUES (?, ?, ?)',
@@ -197,7 +210,7 @@ sub enqueue_submission {
         $dbh->selectrow_array('SELECT submission_id FROM submissions WHERE message_id = ?', undef, $id);
       if (!$submission_id) {
         $dbh->do('INSERT INTO submissions (message_id) VALUES (?)', undef, $id);
-        $submission_id = $dbh->sqlite_last_insert_rowid;
+        $submission_id = $self->_insert_id('submissions', 'submission_id');
         $dbh->do(
 'INSERT INTO deliveries (message_id, position) SELECT message_id, position FROM recipients WHERE message_id = ? ORDER BY position',
           undef, $id
@@ -391,8 +404,8 @@ sub _store_content {
     }
     return;
   }
-  if ($dbh->selectrow_array('SELECT 1 FROM messages WHERE content_sha256 = ? LIMIT 1', undef, $sha)
-    || defined $self->_blob_store->get_blob($sha)) {
+  if ( $dbh->selectrow_array('SELECT 1 FROM messages WHERE content_sha256 = ? LIMIT 1', undef, $sha)
+    || $dbh->selectrow_array('SELECT 1 FROM blossom_blob_data WHERE storage_key = ?', undef, $sha)) {
     croak 'stored content is missing';
   }
   my $ok = eval {
@@ -452,19 +465,31 @@ sub _content {
   my ($self, $sha) = @_;
   my $row = $self->_metadata_store->find_blob($sha);
   croak 'stored content is missing' if !$row;
-  my $bytes = $self->_blob_store->get_blob($row->{storage_key});
+  my $bytes = $self->_blob_bytes($row->{storage_key});
   croak 'stored content is missing' if !defined $bytes;
-  my $type = $self->_dbh->selectrow_array('SELECT typeof(body) FROM blossom_blob_data WHERE storage_key = ?',
-    undef, $row->{storage_key},);
   if ( $row->{storage_key} ne $sha
     || $row->{type} ne 'application/octet-stream'
-    || $type ne 'blob'
     || $row->{size} !~ /\A[1-9][0-9]*\z/smx
     || length($bytes) != $row->{size}
     || sha256_hex($bytes) ne $sha) {
     croak 'stored content integrity check failed';
   }
   return Overnet::Mail::RawMessage->new(raw_bytes => $bytes, max_bytes => $row->{size});
+}
+
+sub _insert_id {
+  my ($self) = @_;
+  return $self->_dbh->sqlite_last_insert_rowid;
+}
+
+sub _blob_bytes {
+  my ($self, $key) = @_;
+  my $bytes = $self->_blob_store->get_blob($key);
+  return if !defined $bytes;
+  my $type =
+    $self->_dbh->selectrow_array('SELECT typeof(body) FROM blossom_blob_data WHERE storage_key = ?', undef, $key);
+  croak 'stored content integrity check failed' if $type ne 'blob';
+  return $bytes;
 }
 
 sub _signature {
@@ -580,8 +605,9 @@ Accepts named arguments or a hash reference. Required C<path> is an absolute loc
 filename without semicolons or controls. The parent directory must exist and be
 private to the application. New or empty databases are initialized; unknown
 schema versions and nonempty foreign databases are rejected. Schema version 3
-rejects prior mail versions 1 and 2 without migration or alteration. PostgreSQL,
-filesystem and S3 backends are not supported by this adapter.
+rejects prior mail versions 1 and 2 without migration or alteration. For PostgreSQL,
+use L<Overnet::Mail::Store::Postgres>. Filesystem and S3 backends are not supported
+by this adapter.
 
 =head2 BUILD
 
@@ -698,8 +724,8 @@ Perl 5.40, strictures, Moo, DBI, DBD::SQLite, Digest::SHA and JSON.
 
 =head1 INCOMPATIBILITIES
 
-Schema version 2 only; version 1 is rejected without changing its data; no migration, external blob store or second mailbox
-owner. Use a supported local SQLite filesystem; network filesystems are outside
+SQLite schema version 3 only; prior versions are rejected without changing
+their data. No migration or external blob store is implemented. Use a supported local SQLite filesystem; network filesystems are outside
 this contract. Durability depends on SQLite, its VFS, filesystem and hardware.
 Process-interruption tests are not power-loss or hardware-failure certification.
 

@@ -16,8 +16,8 @@ outbound root headers without rewriting bytes. See [the boundary contract](docs/
 
 Requires Perl 5.40 or newer, a C compiler/build tools for CPAN dependencies,
 `cpanm`, Git, Bash and GNU-compatible tar. The Net::Blossom dependency chain
-also needs GMP headers/libraries (`libgmp-dev` on Debian/Ubuntu); CI installs
-them explicitly. It does not require an unpublished auth branch or bootstrap.
+also needs GMP and PostgreSQL client headers/libraries (`libgmp-dev libpq-dev`
+on Debian/Ubuntu); CI installs them explicitly. It does not require an unpublished auth branch or bootstrap.
 
 ```sh
 bash scripts/install-deps.sh
@@ -59,8 +59,14 @@ metadata. Mail-specific records and the recipient outbox share their DBI handle
 and one atomic transaction. No Blossom HTTP server, public blob URLs or second
 mail authority are introduced. See [the integration contract](docs/blossom-storage.md).
 New databases use schema version 3; version 1 and 2 files are rejected unchanged
-until an explicit backed-up migration is available. PostgreSQL is not supported
-by this mail adapter yet.
+until an explicit backed-up migration is available.
+
+The separate `Overnet::Mail::Store::Postgres` adapter is experimental until its
+real PostgreSQL CI passes. It reuses the same acceptance/outbox state machine and
+Net::Blossom PostgreSQL components. Explicit schema provisioning, one shared DBI
+handle, and serialized transactions keep custody atomic; database-wide
+serialization intentionally limits throughput, including across schemas.
+See [the PostgreSQL contract and test setup](docs/postgresql-storage.md).
 
 ## Architecture and next milestone
 

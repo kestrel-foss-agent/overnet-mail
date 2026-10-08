@@ -50,7 +50,7 @@ is $store->load(mailbox_id => 'box', message_id => $receipt->{message_id})->{mes
   my $get   = Net::Blossom::Server::Backend::SQLite::BlobStore->can('get_blob');
   my $calls = 0;
   my $fault = mock 'Net::Blossom::Server::Backend::SQLite::BlobStore' => override =>
-    [get_blob => sub { ++$calls; return $calls == 1 ? undef : 'wrong staged content' }];
+    [get_blob => sub { ++$calls; return 'wrong staged content' }];
   like dies { accept_raw($store, 'changed', 'different new content') }, qr/content integrity/,
     'a newly prepared body is rehashed before acceptance';
 }

@@ -12,6 +12,22 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: overnet_mail_test
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d overnet_mail_test"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      OVERNET_REQUIRE_POSTGRES: '1'
+      OVERNET_TEST_PG_DSN: 'dbi:Pg:dbname=overnet_mail_test;host=127.0.0.1;port=5432'
+      OVERNET_TEST_PG_USER: postgres
+      PGUSER: postgres
     strategy:
       fail-fast: false
       matrix:
@@ -23,7 +39,7 @@ jobs:
         with:
           perl-version: ${{ matrix.perl }}
       - name: Install native CPAN prerequisite
-        run: sudo apt-get update && sudo apt-get install -y libgmp-dev
+        run: sudo apt-get update && sudo apt-get install -y libgmp-dev libpq-dev
       - name: Install CPAN and pinned local style dependencies
         run: bash scripts/install-deps.sh
       - name: Normal and author tests
@@ -36,6 +52,22 @@ jobs:
   coverage:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: overnet_mail_test
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d overnet_mail_test"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      OVERNET_REQUIRE_POSTGRES: '1'
+      OVERNET_TEST_PG_DSN: 'dbi:Pg:dbname=overnet_mail_test;host=127.0.0.1;port=5432'
+      OVERNET_TEST_PG_USER: postgres
+      PGUSER: postgres
     name: Per-file coverage 95-85-100
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -43,7 +75,7 @@ jobs:
         with:
           perl-version: '5.40'
       - name: Install native CPAN prerequisite
-        run: sudo apt-get update && sudo apt-get install -y libgmp-dev
+        run: sudo apt-get update && sudo apt-get install -y libgmp-dev libpq-dev
       - name: Install CPAN and pinned local style dependencies
         run: bash scripts/install-deps.sh
       - name: Fail-closed per-file coverage gate

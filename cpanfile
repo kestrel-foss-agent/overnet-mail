@@ -5,6 +5,8 @@ requires 'Email::Simple', '2.218';
 requires 'Email::Address::XS', '1.05';
 requires 'Digest::SHA';
 requires 'DBI', '1.643';
+requires 'DBD::Pg', '3.21.2';
+requires 'Net::Blossom::Server::Backend::Postgres', '0.001004';
 requires 'DBD::SQLite', '1.72';
 requires 'JSON', '4.10';
 requires 'Net::SMTP', '3.15';
