@@ -120,6 +120,7 @@ subtest 'different request keys deduplicate one real large object' => sub {
 };
 
 subtest 'concurrent queue claims have unique fences and stale workers cannot finish' => sub {
+  is [fence(undef)], [undef], 'an absent claim preserves one null value in list context';
   my $schema = provision();
   my @jobs   = map {
     spawn_job(
@@ -307,13 +308,25 @@ for my $stage (qw(enqueue claim finish)) {
           $claim = $store->claim_delivery(mailbox_id => 'box', now => 10, lease_seconds => 1);
           finish($store, $claim, 10) if $stage eq 'finish';
         }
-        write_event($task, 'committed', {receipt => $receipt, claim => fence($claim)});
+        write_event(
+          $task,
+          'committed',
+          {
+            receipt    => $receipt,
+            claim      => fence($claim),
+            stage      => $stage,
+            autocommit => $store->_dbh->{AutoCommit} ? 1 : 0,
+          }
+        );
         await_event($task, 'never_release');
         return;
       }
     );
     start_jobs($job);
     my $checkpoint = await_event($job, 'committed');
+    is $checkpoint->{stage},      $stage, 'worker reached the requested postcommit interruption point';
+    is $checkpoint->{autocommit}, 1,      'the operation committed before the worker is killed';
+    ok exists $checkpoint->{claim}, 'checkpoint includes an explicit optional claim value';
     terminate_job($job);
     my $store = open_store($schema);
     is enqueue($store), $checkpoint->{receipt},
@@ -353,7 +366,16 @@ for my $stage (qw(claim finish)) {
         $claim = $store->claim_delivery(mailbox_id => 'box', now => 10, lease_seconds => 10) if $stage eq 'finish';
         local $store->_dbh->{Callbacks} = {
           commit => sub {
-            write_event($task, 'interrupted', 1);
+            write_event(
+              $task,
+              'interrupted',
+              {
+                stage      => $stage,
+                autocommit => $store->_dbh->{AutoCommit} ? 1 : 0,
+                row        =>
+                  $store->_dbh->selectrow_hashref('SELECT state, attempt FROM deliveries ORDER BY delivery_id LIMIT 1'),
+              }
+            );
             await_event($task, 'never_release');
             return;
           }
@@ -364,7 +386,11 @@ for my $stage (qw(claim finish)) {
       }
     );
     start_jobs($job);
-    await_event($job, 'interrupted');
+    my $checkpoint = await_event($job, 'interrupted');
+    is $checkpoint->{stage},      $stage, 'worker reached the requested precommit interruption point';
+    is $checkpoint->{autocommit}, 0,      'interruption occurs while the transaction is active';
+    is $checkpoint->{row}, {state => $stage eq 'claim' ? 'leased' : 'delivered', attempt => 1},
+      'the pending transition exists before its commit is interrupted';
     terminate_job($job);
     my $store = open_store($schema);
     my $row   = $store->deliveries(mailbox_id => 'box', submission_id => $receipt->{submission_id})->[0];
@@ -441,7 +467,10 @@ sub finish {
 
 sub fence {
   my ($claim) = @_;
-  return if !defined $claim;
+
+  # This helper also occurs inside hash constructors: an absent claim must
+  # contribute one value rather than collapsing the caller's key/value list.
+  return undef if !defined $claim;
   return {map { $_ => $claim->{$_} } qw(delivery_id attempt lease_until uncertain_attempts)};
 }
 
@@ -524,6 +553,11 @@ sub await_event {
   my $path     = "$job->{path}-$name";
   my $deadline = time + 20;
   while (!-e $path) {
+    if ($name ne 'result' && -e "$job->{path}-result") {
+      my $result = await_event($job, 'result');
+      die "worker failed before checkpoint $name: $result->{error}" if $result->{error};
+      die "worker finished before checkpoint $name\n";
+    }
     die "worker checkpoint timed out: $name\n" if time > $deadline;
     sleep 0.01;
   }

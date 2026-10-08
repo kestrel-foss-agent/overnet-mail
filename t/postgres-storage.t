@@ -173,7 +173,7 @@ subtest 'idempotency, private envelopes, and explicit archival promotion' => sub
 subtest 'outbox retry deadlines, fencing, and terminal states' => sub {
   my $fixture = fixture('outcomes');
   my $store   = make_store($fixture);
-  my $item    = submission(raw('queue outcomes'), ['one@example.test', 'two@example.test', 'three@example.test']);
+  my $item = submission(outbound_raw('queue outcomes'), ['one@example.test', 'two@example.test', 'three@example.test']);
   my $receipt = enqueue($store, $item);
   ok !defined $store->claim_delivery(mailbox_id => 'wrong', now => 100), 'wrong mailbox cannot claim';
   my @claims = map { $store->claim_delivery(mailbox_id => 'box', now => 100, lease_seconds => 10) } 1 .. 3;
@@ -206,7 +206,7 @@ for my $outcome (qw(transient uncertain lease_expired)) {
   subtest "five-attempt exhaustion for $outcome" => sub {
     my $fixture = fixture("exhaust_$outcome");
     my $store   = make_store($fixture);
-    my $item    = submission(raw("exhaust $outcome"), ['one@example.test']);
+    my $item    = submission(outbound_raw("exhaust $outcome"), ['one@example.test']);
     my $receipt = enqueue($store, $item);
     my $last;
     for my $attempt (1 .. 5) {
@@ -273,7 +273,7 @@ subtest 'rollback restores mapping, metadata, mail, and large-object bytes' => s
   is counts($dbh), $baseline, 'failed external deletion leaves all accepted rows unchanged';
 
   for my $point (qw(after_prepare after_metadata after_mail after_queue before_commit)) {
-    my $new        = submission(raw("rollback $point\0\xff"), ['private@example.test']);
+    my $new        = submission(outbound_raw("rollback $point\0\xff"), ['private@example.test']);
     my $prior_oids = existing_created_oids();
     my $error;
     if ($point eq 'after_prepare') {
@@ -323,7 +323,7 @@ subtest 'postcommit lost acknowledgements recover stable receipts' => sub {
   my $fixture = fixture('lost_ack');
   my $store   = make_store($fixture);
   my $dbh     = $fixture->{dbh};
-  my $item    = submission(raw("committed despite lost ack\0\xff"), ['one@example.test', 'two@example.test']);
+  my $item    = submission(outbound_raw("committed despite lost ack\0\xff"), ['one@example.test', 'two@example.test']);
   {
     local $dbh->{Callbacks} = {
       commit => sub {
@@ -355,7 +355,7 @@ subtest 'postcommit lost acknowledgements recover stable receipts' => sub {
     'same request key resolves unknown outcome to exact committed identities';
   is counts($fixture->{dbh}), [1, 1, 1, 2, 1, 2], 'receipt recovery creates no duplicate content or delivery';
 
-  my $second = submission(raw('cleanup ack failure'), ['three@example.test']);
+  my $second = submission(outbound_raw('cleanup ack failure'), ['three@example.test']);
   {
     my $fault = mock 'Net::Blossom::Server::Backend::Postgres::BlobStore::_Upload' => override =>
       [commit => sub { die "private cleanup path\n" }];
@@ -413,7 +413,7 @@ subtest 'temporary table names cannot shadow persistent mail custody' => sub {
   # The session omits pg_temp here, so PostgreSQL would otherwise give the
   # temporary schema implicit first priority for relation name resolution.
   my $store   = make_store($fixture);
-  my $raw     = raw("persistent despite temp shadows\0\xff\r\n");
+  my $raw     = raw("Subject: temporary-table shadow regression\r\n\r\npersistent despite temp shadows\0\xff\r\n");
   my $item    = submission($raw, ['private@example.test']);
   my $receipt = enqueue($store, $item);
   is enqueue($store, $item), $receipt, 'temporary names cannot redirect same-key replay';
@@ -480,15 +480,7 @@ subtest 'constructor arguments and schema selection are fail-closed' => sub {
   # a genuine connected DBI handle to cover both refusal branches safely.
   for my $setting (qw(fsync full_page_writes)) {
     $dbh->do('SET search_path = ' . $dbh->quote_identifier($fixture->{schema}) . ', pg_catalog');
-    local $dbh->{Callbacks} = {
-      selectrow_array => sub {
-        my (undef, $sql) = @_;
-        if ($sql eq "SHOW $setting") {
-          $_[1] = q{SELECT 'off'};
-        }
-        return;
-      }
-    };
+    local $dbh->{Callbacks} = {selectrow_array => disabled_setting_callback($setting)};
     like dies { Overnet::Mail::Store::Postgres->new(dbh => $dbh) }, qr/durability settings unavailable/,
       "disabled $setting is refused";
   }
@@ -669,6 +661,11 @@ sub raw {
   return Overnet::Mail::RawMessage->new(raw_bytes => $_[0]);
 }
 
+sub outbound_raw {
+  my ($body) = @_;
+  return raw("Subject: PostgreSQL custody fixture\r\n\r\n" . $body);
+}
+
 sub submission {
   my ($message, $recipients, $sender) = @_;
   return Overnet::Mail::Submission->new(
@@ -678,6 +675,21 @@ sub submission {
       recipients => $recipients,
     )
   );
+}
+
+sub disabled_setting_callback {
+  my ($setting) = @_;
+  return sub {
+    my (undef, $sql) = @_;
+    if ($sql eq "SHOW $setting") {
+
+      # DBI documents undefining $_ as replacing the call with this return value.
+      # The caller's SQL may be a read-only literal and must not be modified.
+      undef $_;
+      return 'off';
+    }
+    return;
+  };
 }
 
 sub accept_item {
