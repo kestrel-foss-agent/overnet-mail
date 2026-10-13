@@ -23,6 +23,7 @@ docs/postgresql-storage.md
 docs/real-mta-lab.md
 docs/transactional-outbox.md
 lab/real-mta/Dockerfile
+lab/real-mta/QueueObservation.pm
 lab/real-mta/control
 lab/real-mta/dovecot.conf
 lab/real-mta/main.cf
@@ -60,6 +61,7 @@ t/postgres-storage.t
 t/quality-provenance.t
 t/raw-message.t
 t/real-mta-contract.t
+t/real-mta-queue-observation.t
 t/store-recovery.t
 t/store.t
 t/submission.t

@@ -15,6 +15,8 @@ use Email::MIME;
 use Mail::IMAPClient;
 use Net::SMTP;
 use Time::HiRes qw(time sleep);
+use lib 'lab/real-mta';
+use QueueObservation ();
 use Overnet::Mail::Store;
 use Overnet::Mail::DeliveryRunner;
 use Overnet::Mail::Transport::LoopbackSMTP;
@@ -27,8 +29,8 @@ use Overnet::Mail::Transport::LoopbackSMTP;
   our @reports;
 
   sub deliver {
-    my ($self, $claim) = @_;
-    my $report = $self->SUPER::deliver($claim);
+    my ($self, $claim, @options) = @_;
+    my $report = $self->SUPER::deliver($claim, @options);
     push @reports, {%{$report}};
     return $report;
   }
@@ -102,7 +104,8 @@ archive_unchanged();
 my $queued = await_value(
   'two messages queued while LMTP is down',
   sub {
-    my $rows = queue_rows();
+    my $rows = queue_rows(stable_recipients => 1);
+    die "unexpected extra Postfix queue IDs before restart\n" if @$rows > 2;
     return @$rows == 2 ? $rows : undef;
   }
 );
@@ -115,8 +118,14 @@ is [
   ['alice@reference.invalid', 'blind@reference.invalid'], 'Postfix durably retains both exact envelope recipients';
 control('postfix-stop');
 control('postfix-start');
-is [sort map { $_->{queue_id} } @{queue_rows()}], \@queue_ids,
+my $restarted = await_value(
+  'same queued messages observed after Postfix restart',
+  sub { return QueueObservation::matching_ids(queue_rows(stable_recipients => 1), \@queue_ids); },
+);
+is [sort map { $_->{queue_id} } @$restarted], \@queue_ids,
   'same Postfix queue IDs survive a daemon restart with LMTP still down';
+is queue_recipients($restarted), queue_recipients($queued),
+  'each surviving Postfix queue ID retains its exact envelope recipients';
 
 # Reopen the application archive too: terminal custody must survive its restart.
 $store->disconnect;
@@ -259,6 +268,7 @@ sub control {
 }
 
 sub queue_rows {
+  my (%options) = @_;
   open my $fh, '-|', '/lab/control', 'queue-json' or die 'queue inspection failed';
   my @rows;
   while (my $line = <$fh>) {
@@ -266,7 +276,14 @@ sub queue_rows {
     push @rows, decode_json($line);
   }
   close $fh or die 'queue inspection command failed';
-  return \@rows;
+  return QueueObservation::unique_rows(\@rows, %options);
+}
+
+sub queue_recipients {
+  my ($rows) = @_;
+  return {
+    map { $_->{queue_id} => [sort map { $_->{address} } @{$_->{recipients}}] } @$rows
+  };
 }
 
 sub await_value {

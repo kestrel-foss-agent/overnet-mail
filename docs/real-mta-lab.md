@@ -53,6 +53,23 @@ they refuse to operate without the disposable image markers. Tests restart the
 services without replacing their spool or mailbox directories. This demonstrates
 service/process restart persistence, **not disk-loss or power-failure durability**.
 
+`postqueue -j` is a live observation rather than an atomic snapshot: Postfix
+documents that a moving queue file can be listed more than once or missed.
+The lab therefore counts distinct exact queue IDs, checks their recipient
+mapping across restart, and retries missing expected IDs within its existing
+45-second observation bound. Any observed unexpected distinct ID fails
+immediately. It never combines incomplete scans, merges different queue IDs
+because their messages match, or waits for an extra ID to disappear. Repeated
+IDs with conflicting sender, arrival time, or message size also fail. While
+LMTP is stopped, repeated IDs must also retain the same recipient-address
+multiset; recipient order and delay details do not affect that comparison.
+This recipient stability check is disabled while the recovered service drains
+mail, since delivery legitimately removes recipients. These observation rules
+do not relax the exact two SMTP invocations or one-copy-per-mailbox assertions.
+Queue IDs are compared only in this isolated Postfix
+instance while LMTP is down and no further messages are submitted; they are
+not treated as globally unique or permanently non-reusable identifiers.
+
 Service startup redirects daemon standard streams to a private container log,
 printed during cleanup, so restarts cannot keep the TAP harness pipe open.
 Startup polls have a five-second bound; service commands have ten-second bounds.
@@ -114,6 +131,8 @@ transport or changed sandbox policy.
 
 ## Upstream references
 
+- [Postfix queue listing and JSON observation semantics](https://www.postfix.org/postqueue.1.html)
+- [Postfix queue movement and restart recovery](https://www.postfix.org/QSHAPE_README.html)
 - [Postfix relay and access control](https://www.postfix.org/SMTPD_ACCESS_README.html)
 - [Postfix configuration parameters](https://www.postfix.org/postconf.5.html)
 - [Dovecot 2.3 LMTP](https://doc.dovecot.org/2.3/configuration_manual/protocols/lmtp_server/)
