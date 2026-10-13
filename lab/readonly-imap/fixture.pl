@@ -112,5 +112,9 @@ if ($action eq 'init' || $action eq 'ensure') {
         $dbh->do('UPDATE blossom_blob_data SET body = ? WHERE storage_key = ?', undef, 'corrupt-synthetic-body', $key);
     }
 } else { die "unknown fixture action\n" }
+# DBI may return the same canonical integer with string or numeric scalar flags.
+# This fixture's JSON transport deliberately serializes receipt time as a number;
+# the Store API and immutable value are unchanged.
+$answer->{received_at} = 0 + $answer->{received_at} if $action eq 'receive' || $action eq 'bulk';
 $store->disconnect;
 print JSON->new->canonical->encode($answer), "\n";

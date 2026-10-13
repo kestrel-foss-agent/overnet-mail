@@ -231,7 +231,8 @@ class ReadOnlyIntegration(unittest.TestCase):
         self.receive(raw=b'PRIVATE OTHER MAILBOX\r\n', key='private', mailbox='other')
         corpus = [PLAIN, ENCODED, MULTIPART]
         for i, raw in enumerate(corpus, 1):
-            first = self.receive(raw=raw, key=f'corpus-{i}')
+            first = self.receive(raw=raw, key=f'corpus-{i}', received_at='1700000000')
+            self.assertEqual(first['received_at'], 1700000000)
             self.assertEqual(self.receive(raw=raw, key=f'corpus-{i}', received_at=1700000999), first)
             self.assertEqual(self.helper_body(i), raw)
         state = self.fixture('state')
