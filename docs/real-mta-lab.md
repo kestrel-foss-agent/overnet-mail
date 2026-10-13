@@ -101,9 +101,9 @@ configuration or production rejection/backscatter policy.
 Existing ambiguous-acknowledgement and crash-recovery tests remain mandatory.
 A crash after SMTP acceptance but before recording still permits duplicate
 mail on retry. No exactly-once delivery claim is made. `LoopbackSMTP` now bounds SMTP I/O
-with an independent total-attempt deadline. `DeliveryRunner` still has no
-lease-derived budget or lease renewal; callers need settlement margin beyond
-the adapter budget, and the lab does not establish production scheduling. Real TLS, authenticated submission,
+with an independent total-attempt deadline. `DeliveryRunner` now derives an SMTP cutoff from its lease with an explicit
+settlement reserve. It never renews leases; database latency can exceed the reserve,
+and the lab does not establish production scheduling. Real TLS, authenticated submission,
 Internet routing, DKIM/DMARC/SPF, DSNs, production supervision, broad SMTPUTF8
 and ordinary mail-client compatibility require separate work and evidence.
 

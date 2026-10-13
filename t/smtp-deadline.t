@@ -90,6 +90,25 @@ for my $stage (qw(connect data body final)) {
   };
 }
 
+subtest 'an external lease cutoff bounds SMTP and retains custody evidence' => sub {
+  for my $case (
+    ['hello', 'transient', 'hello', undef],
+    ['final', 'uncertain', 'final', undef],
+    ['close', 'confirmed', 'final', 250]
+  ) {
+    my ($stage, $expected, $last, $code) = @{$case};
+    my ($outcome, $elapsed, $pid) = fake_attempt(
+      stage            => $stage,
+      mode             => 'stall',
+      attempt_seconds  => 4,
+      external_seconds => 1
+    );
+    is $outcome, result($expected, $last, $code), 'the shorter caller cutoff preserves stage and custody evidence';
+    bounded_elapsed($elapsed);
+    child_is_gone($pid);
+  }
+};
+
 subtest 'completed peer evidence survives blocked socket cleanup' => sub {
   for my $code (250, 450, 550) {
     my ($outcome, $elapsed, $pid) = fake_attempt(stage => 'close', mode => 'stall', final_code => $code);
@@ -384,7 +403,8 @@ sub fake_attempt {
     return bless $handle, 'SMTPDeadlineClient';
   };
   my $started = clock_gettime(CLOCK_MONOTONIC);
-  my $outcome = transport()->deliver($claim);
+  my %limit   = exists $options{external_seconds} ? (deadline => $started + $options{external_seconds}) : ();
+  my $outcome = transport(attempt_seconds => $options{attempt_seconds} // 1)->deliver($claim, %limit);
   my $elapsed = clock_gettime(CLOCK_MONOTONIC) - $started;
   my $pid     = read_file($path);
   chomp $pid;

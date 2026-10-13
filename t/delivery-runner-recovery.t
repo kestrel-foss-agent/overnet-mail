@@ -260,7 +260,7 @@ subtest 'worker process exits after observing final 250 and before completion wr
   $store->disconnect;
 };
 
-subtest 'new worker finishes while the expired worker is still in a real send' => sub {
+subtest 'forward wall-clock jump can reclaim during an already started send' => sub {
   my $store = new_store('overlapping-workers');
   enqueue($store, submission('blind@example.test'));
   my $path = $store->path;
@@ -310,6 +310,43 @@ subtest 'new worker finishes while the expired worker is still in a real send' =
   $store->disconnect;
 };
 
+subtest 'slow peer is stopped and recorded before a stable-clock lease expires' => sub {
+  my $store = new_store('bounded-slow-peer');
+  enqueue($store, submission('blind@example.test'));
+  my $path = $store->path;
+  $store->disconnect;
+  my $peer        = start_peer(block_final => 1);
+  my $result_path = "$dir/bounded-worker-result";
+  my $pid         = fork;
+  die 'bounded worker fork failed' if !defined $pid;
+
+  if (!$pid) {
+    my $child  = Overnet::Mail::Store->new(path => $path);
+    my $result = runner($child, $peer, sub {time})->run_once(mailbox_id => 'box');
+    write_file($result_path, JSON->new->encode($result));
+    $child->disconnect;
+    POSIX::_exit(0);
+  }
+  is signal_read($peer->{ready}), 'B', 'slow peer has the complete body but withholds custody evidence';
+  $store = Overnet::Mail::Store->new(path => $path);
+  my ($other, $unused) = smtp_run($store, time);
+  is $other, {status => 'idle'}, 'a competing connection cannot claim the active bounded attempt';
+  is $unused->{commands}, q{}, 'competing worker sends no SMTP bytes';
+  waitpid $pid, 0;
+  is $?, 0, 'bounded worker returned while the peer still withholds its final reply';
+  my $result = JSON->new->decode(read_file($result_path));
+  is $result, {status => 'recorded', delivery_id => 1, attempt => 1, outcome => 'uncertain', state => 'uncertain'},
+    'deadline kills the SMTP child and reserves time for durable uncertain settlement';
+  is rows($store)->[0]{uncertain_attempts}, 1, 'possible remote custody is never converted to safe non-delivery';
+  signal_write($peer->{release}, 'F');
+  my $observed = finish_peer($peer);
+  is $observed->{received}, $raw, 'timing out does not retract bytes already received';
+  my ($idle, $no_retry) = smtp_run($store, time);
+  is $idle, {status => 'idle'}, 'deadline settlement does not authorize an immediate duplicate send';
+  is $no_retry->{commands}, q{}, 'explicit retry delay is preserved';
+  $store->disconnect;
+};
+
 subtest 'transport exception after real acceptance remains uncertain and bounded' => sub {
   my $store = new_store('exception-after-acceptance');
   enqueue($store, submission('blind@example.test'));
@@ -318,8 +355,8 @@ subtest 'transport exception after real acceptance remains uncertain and bounded
   my ($result, $peer);
   {
     local *Overnet::Mail::Transport::LoopbackSMTP::deliver = sub {
-      my ($transport, $claim) = @_;
-      my $report = $deliver->($transport, $claim);
+      my ($transport, $claim, @options) = @_;
+      my $report = $deliver->($transport, $claim, @options);
       die 'fixture failed to reach real acceptance' if $report->{outcome} ne 'confirmed';
       $saw_confirmation = 1;
       die 'blind@example.test private exception after acceptance';
@@ -400,11 +437,13 @@ sub rows {
 sub runner {
   my ($store, $peer, $clock) = @_;
   return Overnet::Mail::DeliveryRunner->new(
-    store         => $store,
-    transport     => Overnet::Mail::Transport::LoopbackSMTP->new(port => $peer->{port}, timeout => 10),
-    clock         => $clock,
-    retry_after   => 60,
-    lease_seconds => 10,
+    store     => $store,
+    transport =>
+      Overnet::Mail::Transport::LoopbackSMTP->new(port => $peer->{port}, timeout => 10, attempt_seconds => 1),
+    clock              => $clock,
+    retry_after        => 60,
+    lease_seconds      => 10,
+    settlement_seconds => 1,
   );
 }
 

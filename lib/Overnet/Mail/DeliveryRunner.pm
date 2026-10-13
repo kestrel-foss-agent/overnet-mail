@@ -5,18 +5,20 @@ use Moo;
 
 use Carp         qw(croak);
 use Scalar::Util qw(blessed);
+use Time::HiRes  qw(clock_gettime CLOCK_MONOTONIC);
 
 our $VERSION = '0.001';
 
-has store         => (is => 'ro', required => 1);
-has transport     => (is => 'ro', required => 1);
-has clock         => (is => 'ro', required => 1);
-has retry_after   => (is => 'ro', required => 1);
-has lease_seconds => (is => 'ro', default  => sub { return 300 });
+has store              => (is => 'ro', required => 1);
+has transport          => (is => 'ro', required => 1);
+has clock              => (is => 'ro', required => 1);
+has retry_after        => (is => 'ro', required => 1);
+has lease_seconds      => (is => 'ro', default  => sub { return 300 });
+has settlement_seconds => (is => 'ro', default  => sub { return 5 });
 
 sub BUILD {
   my ($self, $args) = @_;
-  my %allowed = map { $_ => 1 } qw(store transport clock retry_after lease_seconds);
+  my %allowed = map { $_ => 1 } qw(store transport clock retry_after lease_seconds settlement_seconds);
   for my $key (keys %{$args}) {
     croak 'unsupported delivery runner option' if !exists $allowed{$key};
   }
@@ -25,8 +27,11 @@ sub BUILD {
     croak 'runner requires Store and LoopbackSMTP objects' if !blessed($self->$name) || !$self->$name->isa($class);
   }
   croak 'runner clock must be a callback' if ref $self->clock ne 'CODE';
-  _integer($self->retry_after,   1, 86_400);
-  _integer($self->lease_seconds, 1, 3_600);
+  _integer($self->retry_after,        1, 86_400);
+  _integer($self->lease_seconds,      1, 3_600);
+  _integer($self->settlement_seconds, 1, 30);
+  croak 'runner lease must exceed attempt, settlement and rounding budgets'
+    if $self->lease_seconds <= $self->transport->attempt_seconds + $self->settlement_seconds + 1;
   return;
 }
 
@@ -35,7 +40,10 @@ sub run_once {
   for my $key (keys %args) {
     croak 'unsupported delivery runner argument' if $key ne 'mailbox_id';
   }
-  my $start = $self->_now(0);
+
+  # Anchor before the integer wall-clock callback and claim can consume time.
+  my $started = clock_gettime(CLOCK_MONOTONIC);
+  my $start   = $self->_now(0);
   my $claim;
   my $claimed = eval {
     $claim = $self->store->claim_delivery(
@@ -52,15 +60,18 @@ sub run_once {
   my %fence = (mailbox_id => $args{mailbox_id}, delivery_id => $claim->{delivery_id}, attempt => $claim->{attempt});
   my $result =
     {status => 'unrecorded', delivery_id => $fence{delivery_id}, attempt => $fence{attempt}, outcome => undef};
-  my $before;
-  my $timed = eval { $before = $self->_now($start); 1 };
-  if (!$timed || $before >= $claim->{lease_until}) {
+  my ($before, $deadline);
+  my $timed = eval { ($before, $deadline) = $self->_budget($claim->{lease_until}, $start, $started); 1 };
+  if (!$timed) {
     $result->{error} = 'lease_unavailable';
     return $result;
   }
 
   my $outcome;
-  my $sent = eval { $outcome = _outcome($self->transport->deliver($claim)); 1 };
+  my $sent = eval {
+    $outcome = _outcome($self->transport->deliver($claim, deadline => $deadline - $self->settlement_seconds));
+    1;
+  };
   if (!$sent) {
     $outcome = 'uncertain';
   }
@@ -68,7 +79,12 @@ sub run_once {
   my %retry = $outcome eq 'transient' || $outcome eq 'uncertain' ? (retry_after => $self->retry_after) : ();
   my $finished;
   my $recorded = eval {
-    $finished = $self->store->finish_delivery(%fence, now => $self->_now($before), outcome => $outcome, %retry);
+    $finished = $self->store->finish_delivery(
+      %fence,
+      now     => $self->_finish_time($before, $deadline),
+      outcome => $outcome,
+      %retry
+    );
     1;
   };
   if (!$recorded) {
@@ -78,6 +94,29 @@ sub run_once {
   $result->{status} = 'recorded';
   $result->{state}  = $finished->{state};
   return $result;
+}
+
+sub _budget {
+  my ($self, $lease_until, $start, $started) = @_;
+  my $sampled = clock_gettime(CLOCK_MONOTONIC);
+  my $before  = $self->_now($start);
+
+  # A floor-rounded Unix clock can overstate remaining time by almost a second.
+  # Neither a slow claim nor a wall-clock rollback may restart that allowance.
+  my $deadline = $started + ($lease_until - $start) - 1;
+  my $observed = $sampled + ($lease_until - $before) - 1;
+  if ($observed < $deadline) { $deadline = $observed; }
+  my $remaining = $deadline - clock_gettime(CLOCK_MONOTONIC);
+  croak 'delivery lease has insufficient budget'
+    if $remaining < $self->transport->attempt_seconds + $self->settlement_seconds;
+  return ($before, $deadline);
+}
+
+sub _finish_time {
+  my ($self, $before, $deadline) = @_;
+  my $now = $self->_now($before);
+  croak 'delivery lease budget expired' if clock_gettime(CLOCK_MONOTONIC) >= $deadline;
+  return $now;
 }
 
 sub _now {
@@ -142,7 +181,10 @@ Moo configuration validation callback; do not call directly.
 
 Requires a Store, LoopbackSMTP transport, trusted clock callback returning integer
 Unix seconds, and explicit C<retry_after> (1 through 86400 seconds). Optional
-C<lease_seconds> is 1 through 3600 seconds, default 300. Unknown options fail.
+C<lease_seconds> is 1 through 3600 seconds, default 300. C<settlement_seconds>
+is 1 through 30 seconds, default 5. The lease must exceed the sum of the adapter
+attempt budget, settlement reserve and one second for integer rounding.
+Unknown options fail.
 Subclasses support controlled test fault injection, not arbitrary transport routing.
 
 =head2 store
@@ -165,6 +207,11 @@ Returns the fixed explicit bounded retry delay, not an automatic retry policy.
 =head2 lease_seconds
 
 Returns the configured lease duration.
+
+=head2 settlement_seconds
+
+Returns the explicit settlement headroom reserved after the SMTP cutoff.
+It does not bound database lock waits or commit latency.
 
 =head2 run_once
 
@@ -195,14 +242,16 @@ Perl 5.40, strictures 2, Moo, Store and the existing LoopbackSMTP adapter.
 
 =head1 INCOMPATIBILITIES
 
-Not a production worker. The adapter has an independent total I/O deadline,
-but no lease-derived budget, operational supervisor, lease renewal,
+Not a production worker. SMTP is bounded by a lease-derived monotonic deadline
+and the adapter attempt budget. No operational supervisor, lease renewal,
 authentication, TLS, Internet routing, downstream retries or DSN processing.
 
 =head1 BUGS AND LIMITATIONS
 
-The pre-send clock check cannot stop a send that outlives its lease. Store fencing
-protects local outcomes only. A final SMTP 250 confirms local MTA custody, not
+Integer-clock rounding, elapsed claims and validation consume the fixed lease
+budget. Settlement reserve cannot guarantee a timely commit. Clock jumps, OS
+scheduling and crashes still limit timing guarantees. Store fencing protects
+local outcomes only. A final SMTP 250 confirms local MTA custody, not
 recipient delivery. A crash after 250 and before recording is ambiguous on recovery;
 retry may duplicate mail. There is no exactly-once guarantee.
 

@@ -45,6 +45,7 @@ t/00-load.t
 t/blossom-storage.t
 t/check-runner.t
 t/ci-contract.t
+t/delivery-lease.t
 t/delivery-runner-recovery.t
 t/delivery-runner.t
 t/envelope.t
@@ -53,6 +54,7 @@ t/manifest.t
 t/metadata.t
 t/outbox-recovery.t
 t/outbox.t
+t/postgres-delivery-runner.t
 t/postgres-recovery.t
 t/postgres-storage.t
 t/quality-provenance.t

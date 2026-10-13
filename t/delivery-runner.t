@@ -28,8 +28,8 @@ is $runner->retry_after,   60,         'explicit retry delay';
 is $runner->lease_seconds, 300,        'default bounded lease';
 is +Overnet::Mail::DeliveryRunner->new({%config, lease_seconds => 3_600, retry_after => 86_400})->lease_seconds, 3_600,
   'hashref constructor and exact upper bounds';
-is +Overnet::Mail::DeliveryRunner->new(%config, lease_seconds => 1, retry_after => 1)->retry_after, 1,
-  'exact lower bounds';
+is +Overnet::Mail::DeliveryRunner->new(%config, lease_seconds => 17, retry_after => 1)->retry_after, 1,
+  'smallest viable lease with default attempt and settlement budgets';
 
 for my $name (qw(store transport)) {
   for my $bad (undef, {}, 'private', $name eq 'store' ? $transport : $store) {
@@ -185,7 +185,7 @@ for my $outcome (qw(transient uncertain)) {
   enqueue($store);
   $report = {outcome => $outcome};
   $now    = 0;
-  $runner = Overnet::Mail::DeliveryRunner->new(%config, store => $store, retry_after => 1, lease_seconds => 1);
+  $runner = Overnet::Mail::DeliveryRunner->new(%config, store => $store, retry_after => 1, lease_seconds => 20);
   for my $attempt (1 .. 5) {
     my $r = $runner->run_once(mailbox_id => 'box');
     is $r->{attempt}, $attempt, 'one bounded attempt is consumed';
@@ -218,9 +218,9 @@ $store->disconnect;
 # A lease can fit near the supported clock limit while a retry deadline cannot.
 $store = fresh();
 enqueue($store);
-$now    = 9_999_999_990;
+$now    = 9_999_999_970;
 $report = {outcome => 'transient'};
-$runner = Overnet::Mail::DeliveryRunner->new(%config, store => $store, lease_seconds => 1);
+$runner = Overnet::Mail::DeliveryRunner->new(%config, store => $store, lease_seconds => 20);
 is $runner->run_once(mailbox_id => 'box'),
   {status => 'unrecorded', delivery_id => 1, attempt => 1, outcome => 'transient', error => 'completion_failed'},
   'Store retry deadline overflow cannot be misreported as durably deferred';
