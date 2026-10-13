@@ -7,6 +7,13 @@ use Overnet::Mail::DeliveryRunner;
 use Overnet::Mail::Store;
 use Overnet::Mail::Transport::LoopbackSMTP;
 
+{
+
+  package Local::NumericDeadline;
+  use Moo;
+  use overload q{0+} => sub { return 1_001 }, q{""} => sub { return '1001' }, fallback => 1;
+}
+
 my $dir    = tempdir(CLEANUP => 1);
 my $serial = 0;
 
@@ -203,7 +210,8 @@ subtest 'adapter rejects invalid or unknown deadline options before SMTP' => sub
     (override => [clock_gettime => set_prototype(q{;$}, sub { return 1_000; })]);
   my $adapter = transport();
   my $claim   = claim();
-  for my $bad (undef, [], {}, sub { return; }, q{}, 'private-value', -1, -0.001, 'NaN', 'Inf', '-Inf', 'Infinity') {
+  for my $bad (undef, [], {}, sub { return; },
+    q{}, 'private-value', -1, -0.001, 'NaN', 'Inf', '-Inf', 'Infinity', Local::NumericDeadline->new) {
     my $error = dies { $adapter->deliver($claim, deadline => $bad) };
     like $error,   qr/finite nonnegative monotonic time/, 'deadline must be a finite nonnegative scalar';
     unlike $error, qr/private-value/,                     'deadline errors never echo supplied values';
