@@ -4,7 +4,8 @@ use strictures 2;
 use Moo;
 
 use Carp         qw(croak);
-use Scalar::Util qw(blessed);
+use Scalar::Util qw(blessed looks_like_number);
+use POSIX        qw(isfinite);
 use Time::HiRes  qw(clock_gettime CLOCK_MONOTONIC);
 use Overnet::Mail::Transport::Attempt;
 use Overnet::Mail::Envelope;
@@ -33,8 +34,17 @@ sub BUILD {
 }
 
 sub deliver {
-  my ($self, $claim) = @_;
+  my ($self, $claim, %args) = @_;
   my $deadline = clock_gettime(CLOCK_MONOTONIC) + $self->attempt_seconds;
+  for my $key (keys %args) {
+    croak 'unsupported delivery argument' if $key ne 'deadline';
+  }
+  if (exists $args{deadline}) {
+    my $limit = $args{deadline};
+    croak 'delivery deadline must be a finite nonnegative monotonic time'
+      if !defined $limit || ref $limit || !looks_like_number($limit) || !isfinite($limit) || $limit < 0;
+    if ($limit < $deadline) { $deadline = $limit; }
+  }
   if (ref $claim ne 'HASH' || !blessed($claim->{message}) || !$claim->{message}->isa('Overnet::Mail::RawMessage')) {
     croak 'delivery requires a single-recipient claim with RawMessage';
   }
@@ -218,6 +228,9 @@ Returns the configured total SMTP attempt budget in seconds.
 =head2 deliver
 
 Accepts an outbox claim hash containing a RawMessage, sender and one recipient.
+Optional C<deadline> is a finite nonnegative absolute C<CLOCK_MONOTONIC> time.
+The earlier of that cutoff and entry plus C<attempt_seconds> wins; validation
+consumes the same budget. Unknown options fail before any SMTP I/O.
 Rechecks the Submission privacy boundary. Returns a fresh hash with C<outcome>,
 C<stage> and C<smtp_code> (undefined without complete peer evidence). Outcomes
 map to the existing queue contract: confirmed, permanent, transient, uncertain.
@@ -255,7 +268,8 @@ credentials or message data. Existing MTAs must own Internet routing/retries;
 this adapter is not an Internet MTA. Uncertain outcomes may have been accepted;
 a retry can duplicate delivery. A Unix child process bounds slow-drip I/O; see the
 adapter contract for process ownership, signal, preflight and timing limits.
-The caller must size its lease to include the attempt plus settlement margin.
+DeliveryRunner supplies a conservative lease-derived cutoff with settlement
+headroom; direct callers must still account for their own lease and settlement.
 
 =head1 AUTHOR
 

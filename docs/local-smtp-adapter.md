@@ -155,13 +155,20 @@ uninterruptible kernel waits are not hard real-time guarantees. A terminated
 parent can lose the child's custody evidence; normal lease-expiry ambiguity
 still applies. Neither this deadline nor local fencing can recall sent bytes.
 
-This change deliberately preserves the runner API and existing lease behavior.
-A trusted caller must choose a lease longer than `attempt_seconds` plus claim,
-validation, scheduling and durable-settlement margins. There is no automatic
-lease-derived cap, renewal, or atomic relationship between monotonic time and
-the runner's integer Unix clock. A short lease can still expire during an attempt;
-fencing continues to reject late completion. Precise lease-aware execution is a
-separate boundary, not an exactly-once claim.
+`deliver($claim, deadline => $absolute_monotonic_time)` optionally accepts a
+finite nonnegative deadline from `CLOCK_MONOTONIC`. The earlier of this cutoff and
+entry time plus `attempt_seconds` wins. Unknown options or invalid deadline values
+throw before network I/O. Expired deadlines are safe: validation still runs;
+otherwise valid wire forms return transient/connect without opening a connection.
+Unsupported wire forms retain their local permanent result. Supplying a later deadline
+never increases the adapter budget. This same absolute deadline reaches both the
+parent supervisor and child watchdog, including time spent validating the claim.
+
+The [lease-aware runner](local-delivery-runner.md#fixed-lease-budgeting) derives
+this cutoff conservatively from its integer lease clock and reserves separate time
+for settlement. Direct adapter callers must still choose and enforce their own
+custody/settlement policy. There is no automatic lease renewal, atomic relationship
+between remote acceptance and local commit, or exactly-once claim.
 
 Existing mature MTAs must own Internet routing, downstream SMTP retry/backoff,
 queueing and DSN/bounce processing. The application outbox tracks the handoff to

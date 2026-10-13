@@ -13,6 +13,18 @@ like $control, qr/ip route show/, 'runtime routes verified';
 like $control, qr{postfix start </dev/null >>/lab/services[.]log 2>&1}, 'Postfix restart cannot retain TAP pipe';
 like $control, qr{dovecot </dev/null >>/lab/services[.]log 2>&1}, 'Dovecot restart cannot retain TAP pipe';
 like $control, qr{cat /lab/services[.]log}, 'service diagnostics remain visible after cleanup';
+my $integration = slurp('xt/integration/real-mta.t');
+like $integration, qr/SUPER::deliver\(\$claim, \@options\)/, 'real adapter observer forwards the runner deadline';
+like $integration, qr/my \$restarted = await_value\(.*?QueueObservation::matching_ids/s,
+  'restart observations use the bounded retry loop and exact ID matcher';
+like $integration, qr/my \$queued = await_value\(.*?queue_rows\(stable_recipients => 1\)/s,
+  'initial LMTP-down observation checks duplicate recipient identity';
+like $integration, qr/matching_ids\(queue_rows\(stable_recipients => 1\)/,
+  'restart LMTP-down observation checks recipients before duplicate rows are collapsed';
+like $integration, qr/await_value\('Postfix drains.*?queue_rows\(\)/,
+  'delivery recovery permits changing recipient membership';
+like $integration, qr/my \$deadline = time \+ 45;.*?while \(time < \$deadline\).*?die "timed out:/s,
+  'missing expected IDs remain subject to the existing observation deadline';
 my $main = slurp('lab/real-mta/main.cf');
 like $main, qr/^inet_interfaces = 127\.0\.0\.1$/m, 'SMTP binds private loopback';
 like $main, qr/^smtpd_relay_restrictions = reject_unauth_destination$/m, 'loopback is not a relay bypass';

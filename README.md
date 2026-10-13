@@ -82,7 +82,8 @@ See [the local storage contract](docs/local-storage.md),
 transactional, with a [bounded per-recipient outbox](docs/transactional-outbox.md).
 A [local SMTP adapter](docs/local-smtp-adapter.md) now tests the handoff boundary
 using Net::SMTP. A [one-shot delivery runner](docs/local-delivery-runner.md) joins
-that adapter to the durable outbox with explicit crash and completion ambiguity.
+that adapter to the durable outbox with lease-derived SMTP deadlines, an explicit
+settlement reserve, and honest crash and completion ambiguity.
 An [isolated real-MTA lab](docs/real-mta-lab.md) exercises Postfix custody and
 Dovecot as an external synthetic reference recipient, retrieved through IMAP.
 It does not introduce an Overnet mailbox backend or deploy a mail service.

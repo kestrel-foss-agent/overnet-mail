@@ -25,6 +25,7 @@ my $runner = Overnet::Mail::DeliveryRunner->new(
   clock => sub { time },
   retry_after => 60,
   lease_seconds => 300,
+  settlement_seconds => 5,
 );
 my $result = $runner->run_once(mailbox_id => 'fixture');
 ```
@@ -38,14 +39,20 @@ destination can be configured through this runner.
 
 ## Exactly one bounded attempt
 
-1. Read the caller's trusted clock and claim one due recipient. Store commits the
-   lease before returning; no database transaction spans SMTP I/O
+1. Anchor monotonic time before reading the caller's trusted integer clock and
+   claiming one due recipient. Store commits the lease before returning; no
+   database transaction spans SMTP I/O
 2. Copy the original mailbox, delivery ID and attempt before passing the claim
    to the transport. The claim contains only this recipient, never sibling or
    blind-recipient lists
-3. Read time again. A bad/backwards clock or known-expired lease prevents sending
-4. Call the loopback adapter once, then read current time and pass its outcome to
-   Store completion with the original fence
+3. Read time again and admit an attempt only if the remaining conservative lease
+   budget fits the adapter's full `attempt_seconds` plus `settlement_seconds`.
+   A bad/backwards clock, expired lease or insufficient budget prevents sending
+4. Pass the lease-derived monotonic cutoff, less the settlement reserve, into
+   the loopback adapter. Its own attempt deadline and the supplied cutoff both
+   apply; validation and process scheduling consume those same deadlines
+5. Read current wall and monotonic time before Store completion with the original
+   fence. Preserve observed custody evidence if completion cannot be recorded
 
 The adapter's four classifications keep their existing meanings. Confirmed means
 complete final SMTP 250 and local MTA custody, not recipient mailbox delivery or
@@ -57,7 +64,7 @@ from an exception string. Addresses, bytes, peer text and exception messages are
 never returned as diagnostics.
 
 The caller supplies a fixed `retry_after` of 1–86400 seconds. It is used only for
-transient/uncertain results. `lease_seconds` is 1–3600, default 300. Existing Store
+transient/uncertain results. `lease_seconds` is 1–3600, default 300; `settlement_seconds` is 1–30, default 5. Existing Store
 rules still cap attempts at five, fence stale results, delay eligible retries and
 preserve uncertainty summaries. A call never sleeps, retries, drains the queue,
 renews leases or sends a second recipient. Repeated calls are explicit caller
@@ -71,7 +78,8 @@ returns the original `delivery_id`, `attempt`, and `outcome`, plus:
 
 - `status => 'recorded'` and `state`: Store acknowledged committed completion
 - `status => 'unrecorded', error => 'lease_unavailable'`: no transport call was
-  made because the second clock read failed, moved backwards or showed expiry;
+  made because the second clock read failed, moved backwards or the remaining
+  lease could not fit the full attempt plus settlement reserve;
   `outcome` is undefined
 - `status => 'unrecorded', error => 'completion_failed'`: completion was not
   acknowledged, for example because of DB failure, bad time or a stale lease.
@@ -96,22 +104,56 @@ remote custody from this gap. The tests explicitly demonstrate that recovery and
 that another attempt can duplicate a message already accepted by the fixture.
 There is no exactly-once delivery guarantee.
 
-At exact lease expiry, completion fails. A newer worker's recorded result cannot
+A completion timestamp at or beyond lease expiry is rejected. A newer worker's recorded result cannot
 be overwritten by an older worker finishing late, even if the older worker also
 observed 250. Fencing protects database writes only: it cannot recall bytes sent
-to an MTA. The pre-send time check narrows an obvious stale-send window but does
-not close the race. The adapter now has an independent total SMTP I/O budget
-(`attempt_seconds`, default 10); see its [deadline contract](local-smtp-adapter.md#total-smtp-attempt-deadline).
-This does not derive a budget from the lease or alter existing short-lease
-behavior. Callers must size leases for that budget plus claim, validation,
-scheduling and settlement margins. A short lease can expire during the bounded
-exchange, and a parent crash can lose acceptance evidence. Lease-aware scheduling
-and supervision remain separate production work.
+to an MTA.
 
-Clocks must return integer Unix seconds in Store's supported range and remain
-trusted, consistent and nondecreasing across workers and calls. This runner checks
-monotonicity within each invocation; Store also validates computed deadlines.
-Clock synchronization/rollback handling remain operational prerequisites.
+### Fixed lease budgeting
+
+The runner reserves the adapter's configured total `attempt_seconds` (default 10)
+and an explicit `settlement_seconds` (default 5). Construction rejects a lease
+that does not exceed their sum plus the one-second rounding allowance, before any
+claim can be consumed. With defaults the minimum viable lease is 17 seconds.
+It never renews a lease or starts
+a reduced-budget attempt merely to squeeze work into an almost-expired claim.
+One additional whole second is deducted for the worst case of floor-rounded Unix
+time. This rounding allowance is separate from the settlement reserve.
+
+The initial monotonic anchor is taken before the first clock callback and claim.
+The conservative lease deadline is that anchor plus `lease_until - initial_now - 1`.
+A second anchor, taken before the pre-send clock callback, maps its wall-clock
+reading the same way; the earlier deadline wins. The remaining-time check occurs
+after that callback. Thus delayed claims, clock callbacks and validation cannot
+restart or lengthen the allowance. A forward clock adjustment may shorten it.
+A backward reading fails closed. At the exact remaining-budget admission boundary,
+the configured attempt and reserve fit; any smaller budget refuses transport.
+
+The adapter receives the conservative lease deadline minus the settlement reserve,
+and caps it again by its own entry-time attempt deadline. Its existing
+[supervisor](local-smtp-adapter.md#total-smtp-attempt-deadline) stops/reaps the SMTP
+child, retaining queued body/custody evidence. Validation and scheduling elapsed
+after admission are charged to the same cutoff; no connection starts if validation
+exhausts it. Before settlement the runner also checks its conservative monotonic
+lease deadline, so a frozen integer clock cannot authorize an already-overrun attempt.
+
+The reserve is headroom, **not a database commit deadline**. Store checks the
+completion timestamp supplied before its serialized transaction; lock waits,
+queries or commit acknowledgement can outlast the reserve. An acknowledged commit
+is still `recorded`. Failures and lost acknowledgements remain `unrecorded` with
+the observed outcome intact. The original attempt fence rejects a delayed result
+if another worker has reclaimed or settled the delivery. There is no DB cancellation,
+automatic renewal, hard whole-method bound or recovery of lost remote evidence.
+
+Clocks must return floor-rounded integer Unix seconds in Store's supported range
+and remain trusted, consistent and nondecreasing across workers and calls. The
+runner checks rollback within each invocation. A clock jump during SMTP or clock
+skew between workers can still allow early reclamation relative to a previously
+mapped monotonic deadline. OS scheduling pauses, process creation/cleanup,
+uninterruptible waits and parent crashes also prevent hard real-time guarantees.
+Clock synchronization and operational supervision remain prerequisites. These
+bounds reduce stale-send opportunities; they do not provide exactly-once custody
+or a guarantee that two attempts can never overlap.
 
 ## Verification and next boundary
 
@@ -124,8 +166,8 @@ source-distribution gates apply. Process exits are not power-loss certification.
 
 Existing mature MTAs must own downstream routing, retries and DSN processing;
 accepted MTA custody must not be retried merely because recipient delivery is not
-yet known. A production worker still needs a separately reviewed lease-aware execution
-contract, supervision, scheduling, authorization, authenticated verified TLS as
+yet known. A production worker still needs operational supervision, scheduling,
+authorization, authenticated verified TLS as
 applicable, and actual MTA/client interoperability testing. This milestone neither
 implements nor certifies those boundaries. See the [SMTP adapter contract](local-smtp-adapter.md)
 and [outbox contract](transactional-outbox.md).
