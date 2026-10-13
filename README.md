@@ -24,6 +24,12 @@ bash scripts/install-deps.sh
 bash scripts/check.sh all
 ```
 
+On Linux, the orphan-process regression also needs `syscall.ph`. If your Perl
+package omits it, generate a temporary include directory from the installed system
+headers with `bash scripts/prepare-syscall-headers.sh /tmp/overnet-syscall`, then
+prepend `/tmp/overnet-syscall` to `PERL5LIB`. CI does this explicitly; the regression
+never silently skips on Linux and no architecture syscall numbers are hard-coded.
+
 Normal install tests use Test2::V0 and are all directly under `t/`, so the
 unchanged upstream coverage collector includes every test. `make test` and
 `prove -rlv t` are both supported. Author checks remain under `xt/author/`.

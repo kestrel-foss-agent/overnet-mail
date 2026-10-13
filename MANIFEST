@@ -115,3 +115,4 @@ t/smtp-attempt-unit.t
 t/smtp-deadline.t
 t/smtp-exchange.t
 t/smtp-syscalls.t
+scripts/prepare-syscall-headers.sh
