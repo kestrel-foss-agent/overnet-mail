@@ -66,8 +66,8 @@ unimplemented. Do not broadly delete temporary files while uploads are active.
 
 ## Schema and supported backends
 
-New mail databases use application ID 1330463049 and schema version 3. Old
-version-1 and version-2 mail databases are rejected unchanged. Existing foreign
+New mail databases use application ID 1330463049 and schema version 4. Old
+version-1, version-2 and version-3 mail databases are rejected unchanged. Existing foreign
 or standalone Blossom databases are also rejected; this is component reuse,
 not an implicit adoption/migration of another application's data. Keep a verified
 backup and continue using the prior code until a reviewed migration exists.
@@ -101,3 +101,8 @@ or newer; the initially tested release matches upstream commit
 084c7db09465f3470fec9748b4e467bea5f567f9. See the third-party notice for provenance.
 The existing per-module coverage, author/style and source-distribution gates
 remain mandatory. No quality template or threshold is relaxed for this reuse.
+
+The later [recipient mailbox milestone](recipient-mailbox.md) adds authoritative
+recipient entries with references to both Blossom tables in this same transaction.
+The [PostgreSQL adapter](postgresql-storage.md) now provides the equivalent shared
+storage boundary; the candidate discussion above describes the initial SQLite milestone.

@@ -4,7 +4,7 @@ A Perl email application built around ordinary Internet email compatibility.
 
 **Status: development, no running mail service.** The CI foundation is followed
 by immutable message/envelope objects, shared Net::Blossom SQLite storage and an explicit
-transactional per-recipient outbox. A loopback-only SMTP adapter exercises local
+transactional per-recipient outbox and authoritative incoming mailbox receipts. A loopback-only SMTP adapter exercises local
 scripted fixtures, and a one-shot runner records each fenced handoff. Authentication
 and operational network delivery services are not implemented or deployed.
 
@@ -64,7 +64,7 @@ Net::Blossom’s SQLite BlobStore and MetadataStore now own byte storage and blo
 metadata. Mail-specific records and the recipient outbox share their DBI handle
 and one atomic transaction. No Blossom HTTP server, public blob URLs or second
 mail authority are introduced. See [the integration contract](docs/blossom-storage.md).
-New databases use schema version 3; version 1 and 2 files are rejected unchanged
+New databases use schema version 4; version 1, 2 and 3 files are rejected unchanged
 until an explicit backed-up migration is available.
 
 The separate `Overnet::Mail::Store::Postgres` adapter is experimental until its
@@ -87,7 +87,10 @@ settlement reserve, and honest crash and completion ambiguity.
 An [isolated real-MTA lab](docs/real-mta-lab.md) exercises Postfix custody and
 Dovecot as an external synthetic reference recipient, retrieved through IMAP.
 It does not introduce an Overnet mailbox backend or deploy a mail service.
-Authentication and production transport adapters remain next, followed by tested
+The [recipient mailbox foundation](docs/recipient-mailbox.md) now atomically
+receives, lists and fetches durable incoming entries without exposing private
+outbound envelopes. It remains a trusted local API, with ordinary-client IMAP,
+identity/routing and production transport adapters still ahead, followed by tested
 native and Internet interoperability. Reuse maintained CPAN libraries and
 existing MTA and mailbox servers instead of implementing their protocols from scratch.
 

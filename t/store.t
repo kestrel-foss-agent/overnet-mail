@@ -14,7 +14,7 @@ is $store->max_message_bytes,                            10_485_760, 'default ac
 is $store->_dbh->selectrow_array('PRAGMA synchronous'),  3,          'EXTRA sync selected';
 is $store->_dbh->selectrow_array('PRAGMA foreign_keys'), 1,          'foreign keys enforced';
 is $store->_dbh->selectrow_array('PRAGMA journal_mode'), 'delete',   'rollback journal selected';
-is $store->_dbh->selectrow_array('PRAGMA user_version'), 3,          'Blossom-backed store uses schema version three';
+is $store->_dbh->selectrow_array('PRAGMA user_version'), 4,          'Blossom-backed store uses schema version four';
 is $store->_dbh->selectrow_array(q{SELECT COUNT(*) FROM sqlite_master WHERE name = 'contents'}), 0,
   'legacy duplicate content table is absent';
 like dies { $store->path($path) }, qr/read-only/, 'configuration accessors read-only';

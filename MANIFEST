@@ -120,3 +120,8 @@ t/smtp-deadline.t
 t/smtp-exchange.t
 t/smtp-syscalls.t
 scripts/prepare-syscall-headers.sh
+lib/Overnet/Mail/Store/Mailbox.pm
+docs/recipient-mailbox.md
+t/mailbox.t
+t/mailbox-recovery.t
+t/postgres-mailbox.t

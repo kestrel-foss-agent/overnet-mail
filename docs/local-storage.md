@@ -21,7 +21,7 @@ Blossom stages an upload in a private temporary file, then prepares its bytes
 inside the same database transaction. The file is not authoritative and is
 removed after commit or rollback. See [the staging and cleanup limits](blossom-storage.md). The schema
 version and application ID reject unrecognized database markers; no migrations
-are attempted; schema version 3 rejects existing version-1 and version-2 files without changing
+are attempted; schema version 4 rejects existing version-1, version-2 and version-3 files without changing
 their data. Opening is not a full schema/integrity audit of an existing file.
 
 The identities deliberately have different meanings:
@@ -100,7 +100,7 @@ garbage-collects blobs, so orphan reconciliation and retention need an explicit
 future maintenance contract.
 
 Still absent: authentication/authorization, relay policy, quotas, mailbox flags
-and listing, network delivery/bounces, SMTP/IMAP/JMAP,
+and folder management, network delivery/bounces, SMTP/IMAP/JMAP,
 backup/restore tooling and production operations. No compatibility-matrix row
 is marked end-to-end verified by this storage unit-test suite.
 
@@ -122,3 +122,7 @@ is marked end-to-end verified by this storage unit-test suite.
   rollback-journal recovery and filesystem/hardware assumptions
 - [JSON](https://metacpan.org/pod/JSON) and the core Digest::SHA are established modules for the internal
   acceptance fingerprint; no mail or network protocol is implemented here
+
+Recipient membership now has a separate atomic receive/list/fetch API; see the
+[recipient mailbox contract](recipient-mailbox.md). Archive records and the
+trusted private-envelope `load` API are unchanged.
