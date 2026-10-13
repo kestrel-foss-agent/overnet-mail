@@ -1,0 +1,26 @@
+dovecot_config_version = 2.4.5
+dovecot_storage_version = 2.4.5
+base_dir = @TEST_ROOT@/run
+state_dir = @TEST_ROOT@/state
+log_path = /dev/stderr
+mail_home = @TEST_ROOT@/home
+mail_driver = overnet_readonly
+mailbox_list_layout = none
+mail_plugins {
+  overnet_readonly = yes
+}
+mail_plugin_dir = @PLUGIN_DIR@
+namespace inbox {
+  inbox = yes
+  separator = /
+}
+ssl = no
+stats_writer_socket_path =
+imap_max_line_length = 64k
+mail_max_keyword_length = 64
+import_environment {
+  PATH = /usr/bin:/bin
+  OVERNET_IMAP_HELPER = @HELPER@
+  OVERNET_IMAP_CONFIG = @STORE_CONFIG@
+  PERL5LIB = @PERL5LIB@
+}

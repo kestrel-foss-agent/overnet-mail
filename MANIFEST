@@ -128,3 +128,17 @@ t/postgres-mailbox.t
 docs/imap-identifiers.md
 t/imap-identifiers.t
 t/imap-recovery.t
+.github/workflows/readonly-imap.yml
+lab/readonly-imap/README.md
+lab/readonly-imap/bootstrap-dovecot.sh
+lab/readonly-imap/bridge-io.c
+lab/readonly-imap/bridge-io.h
+lab/readonly-imap/bridge-probe.c
+lab/readonly-imap/build-plugin.sh
+lab/readonly-imap/dovecot.conf.in
+lab/readonly-imap/fixture.pl
+lab/readonly-imap/overnet-readonly-plugin.c
+lab/readonly-imap/store-helper.pl
+lab/readonly-imap/test-bridge.py
+lab/readonly-imap/test-protocol.py
+lab/readonly-imap/test-readonly.py

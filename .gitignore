@@ -12,3 +12,6 @@
 *.bak
 *.tdy
 *.ERR
+
+__pycache__/
+*.pyc

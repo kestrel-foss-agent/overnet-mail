@@ -52,3 +52,12 @@ The adapter's same-transaction large-object read uses PostgreSQL's public
 - Archive SHA-256: `b753b532b6253ee07c1766c7df01b83ef3fbadbb0630f6aefbeb91715c9141b1`
 - DBD::Pg source: https://cpan.metacpan.org/authors/id/T/TU/TURNSTEP/DBD-Pg-3.21.2.tar.gz
 - Archive SHA-256: `d79179255ccb0c87b029db2eecaea56828e581255c48445d5fc0e79fa4e9245b`
+
+## Local Dovecot integration dependency
+
+The read-only INBOX lab builds external Dovecot CE 2.4.5 from its official source
+release, pinned by SHA-256. No Dovecot source or binaries are vendored. Dovecot's
+raw/index storage and IMAP command APIs are linked through its installed private
+development headers. Its LGPL-2.1/MIT source notices remain in the external
+release. The new Overnet adapter is GPL-3.0-only. See
+[the integration lab](lab/readonly-imap/README.md) for exact release and ABI scope.
