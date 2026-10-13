@@ -130,6 +130,8 @@ branch/PR CI runs. Process crash tests are not power-loss or hardware tests.
 The [recipient mailbox foundation](recipient-mailbox.md) raises the independent
 PostgreSQL mail schema version from 1 to 2. It adds recipient membership directly
 referencing both Blossom tables and inherits the same receive/list/fetch API as
-SQLite. Version 1 is rejected unchanged; no implicit migration is performed.
+SQLite. The [IMAP identifier layer](imap-identifiers.md) subsequently raises this
+to version 3, with durable mailbox state and local UIDs. Versions 1 and 2 are
+rejected unchanged; no implicit migration is performed.
 Receipt-only references protect content, and real PostgreSQL tests exercise
 atomic receipt recovery and concurrent replay.

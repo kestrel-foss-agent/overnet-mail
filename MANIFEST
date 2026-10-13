@@ -125,3 +125,6 @@ docs/recipient-mailbox.md
 t/mailbox.t
 t/mailbox-recovery.t
 t/postgres-mailbox.t
+docs/imap-identifiers.md
+t/imap-identifiers.t
+t/imap-recovery.t

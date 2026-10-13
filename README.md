@@ -64,7 +64,7 @@ Net::Blossom’s SQLite BlobStore and MetadataStore now own byte storage and blo
 metadata. Mail-specific records and the recipient outbox share their DBI handle
 and one atomic transaction. No Blossom HTTP server, public blob URLs or second
 mail authority are introduced. See [the integration contract](docs/blossom-storage.md).
-New databases use schema version 4; version 1, 2 and 3 files are rejected unchanged
+New databases use schema version 5; version 1, 2, 3 and 4 files are rejected unchanged
 until an explicit backed-up migration is available.
 
 The separate `Overnet::Mail::Store::Postgres` adapter is experimental until its
@@ -89,9 +89,10 @@ Dovecot as an external synthetic reference recipient, retrieved through IMAP.
 It does not introduce an Overnet mailbox backend or deploy a mail service.
 The [recipient mailbox foundation](docs/recipient-mailbox.md) now atomically
 receives, lists and fetches durable incoming entries without exposing private
-outbound envelopes. It remains a trusted local API, with ordinary-client IMAP,
-identity/routing and production transport adapters still ahead, followed by tested
-native and Internet interoperability. Reuse maintained CPAN libraries and
+outbound envelopes. The [durable IMAP identifier layer](docs/imap-identifiers.md)
+adds UIDVALIDITY, UIDNEXT and mailbox-local UIDs. These remain trusted local APIs;
+ordinary-client IMAP, identity/routing and production transport adapters remain
+ahead, followed by tested native and Internet interoperability. Reuse maintained CPAN libraries and
 existing MTA and mailbox servers instead of implementing their protocols from scratch.
 
 ## License

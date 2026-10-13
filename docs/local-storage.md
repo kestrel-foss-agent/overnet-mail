@@ -21,7 +21,7 @@ Blossom stages an upload in a private temporary file, then prepares its bytes
 inside the same database transaction. The file is not authoritative and is
 removed after commit or rollback. See [the staging and cleanup limits](blossom-storage.md). The schema
 version and application ID reject unrecognized database markers; no migrations
-are attempted; schema version 4 rejects existing version-1, version-2 and version-3 files without changing
+are attempted; schema version 5 rejects existing version-1, version-2, version-3 and version-4 files without changing
 their data. Opening is not a full schema/integrity audit of an existing file.
 
 The identities deliberately have different meanings:

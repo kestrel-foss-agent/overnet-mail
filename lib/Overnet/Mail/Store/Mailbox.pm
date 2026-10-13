@@ -13,15 +13,31 @@ requires qw(_dbh _transaction _item _store_content _content _insert_id);
 sub _deploy_mailbox_tables {
   my ($self, $primary_key, $integer) = @_;
   my $dbh = $self->_dbh;
+  $dbh->do(<<"ALLOCATOR");
+CREATE TABLE mailbox_uidvalidity (
+      singleton $integer PRIMARY KEY CHECK(singleton = 1),
+      next_value $integer NOT NULL CHECK(next_value BETWEEN 1 AND 4294967296)
+)
+ALLOCATOR
+  $dbh->do('INSERT INTO mailbox_uidvalidity (singleton, next_value) VALUES (1, 1)');
+  $dbh->do(<<"MAILBOXES");
+CREATE TABLE mailboxes (
+      mailbox_id TEXT NOT NULL PRIMARY KEY,
+      uidvalidity $integer NOT NULL UNIQUE CHECK(uidvalidity BETWEEN 1 AND 4294967295),
+      uidnext $integer NOT NULL CHECK(uidnext BETWEEN 1 AND 4294967295)
+)
+MAILBOXES
   $dbh->do(<<"ENTRIES");
 CREATE TABLE mailbox_entries (
       entry_id $primary_key CHECK(entry_id BETWEEN 1 AND 999999999999999999),
-      mailbox_id TEXT NOT NULL,
+      mailbox_id TEXT NOT NULL REFERENCES mailboxes(mailbox_id),
+      uid $integer NOT NULL CHECK(uid BETWEEN 1 AND 4294967294),
       idempotency_key TEXT NOT NULL,
       content_sha256 TEXT NOT NULL REFERENCES blossom_blobs(sha256)
         REFERENCES blossom_blob_data(storage_key),
       received_at $integer NOT NULL CHECK(received_at BETWEEN 0 AND 9999999999),
-      UNIQUE(mailbox_id, idempotency_key)
+      UNIQUE(mailbox_id, idempotency_key),
+      UNIQUE(mailbox_id, uid)
 )
 ENTRIES
   $dbh->do('CREATE INDEX mailbox_entries_cursor ON mailbox_entries(mailbox_id, entry_id)');
@@ -52,10 +68,15 @@ sub receive_message {
         }
         return $existing;
       }
+      my $state = $self->_ensure_mailbox($args{mailbox_id});
+      my $uid   = $state->{uidnext};
+      croak 'mailbox UID space exhausted' if $uid == 4_294_967_295;
+      $dbh->do('UPDATE mailboxes SET uidnext = uidnext + 1 WHERE mailbox_id = ?', undef, $args{mailbox_id});
       $self->_store_content($message);
       $dbh->do(
-        'INSERT INTO mailbox_entries (mailbox_id, idempotency_key, content_sha256, received_at) VALUES (?, ?, ?, ?)',
-        undef, $args{mailbox_id}, $args{idempotency_key}, $message->content_sha256, $args{received_at},);
+'INSERT INTO mailbox_entries (mailbox_id, uid, idempotency_key, content_sha256, received_at) VALUES (?, ?, ?, ?, ?)',
+        undef, $args{mailbox_id}, $uid, $args{idempotency_key}, $message->content_sha256, $args{received_at},
+      );
       return {
         entry_id       => $self->_insert_id('mailbox_entries', 'entry_id'),
         content_sha256 => $message->content_sha256,
@@ -91,6 +112,76 @@ sub load_mailbox_entry {
       my $row = $self->_dbh->selectrow_hashref(
         'SELECT entry_id, content_sha256, received_at FROM mailbox_entries WHERE mailbox_id = ? AND entry_id = ?',
         undef, $args{mailbox_id}, $args{entry_id},);
+      return if !$row;
+      return {%{$row}, message => $self->_content($row->{content_sha256})};
+    }
+  );
+}
+
+sub ensure_mailbox {
+  my ($self, %args) = @_;
+  _mailbox_token($args{mailbox_id});
+  return $self->_transaction(
+    sub {
+      $self->_ensure_mailbox($args{mailbox_id});
+      return $self->_mailbox_state($args{mailbox_id});
+    }
+  );
+}
+
+sub _ensure_mailbox {
+  my ($self, $mailbox) = @_;
+  my $state =
+    $self->_dbh->selectrow_hashref('SELECT uidvalidity, uidnext FROM mailboxes WHERE mailbox_id = ?', undef, $mailbox,);
+  return $state if $state;
+  my $dbh      = $self->_dbh;
+  my $validity = $dbh->selectrow_array('SELECT next_value FROM mailbox_uidvalidity WHERE singleton = 1');
+  croak 'mailbox UIDVALIDITY space exhausted' if $validity > 4_294_967_295;
+  $dbh->do('UPDATE mailbox_uidvalidity SET next_value = next_value + 1 WHERE singleton = 1');
+  $dbh->do('INSERT INTO mailboxes (mailbox_id, uidvalidity, uidnext) VALUES (?, ?, 1)', undef, $mailbox, $validity);
+  return {uidvalidity => $validity, uidnext => 1};
+}
+
+sub mailbox_state {
+  my ($self, %args) = @_;
+  _mailbox_token($args{mailbox_id});
+  return $self->_transaction(sub { return $self->_mailbox_state($args{mailbox_id}) });
+}
+
+sub _mailbox_state {
+  my ($self, $mailbox) = @_;
+  return $self->_dbh->selectrow_hashref(
+'SELECT uidvalidity, uidnext, (SELECT COUNT(*) FROM mailbox_entries WHERE mailbox_id = ?) AS message_count FROM mailboxes WHERE mailbox_id = ?',
+    undef, $mailbox, $mailbox,
+  );
+}
+
+sub mailbox_uid_entries {
+  my ($self, %args) = @_;
+  _mailbox_token($args{mailbox_id});
+  my $after = exists $args{after_uid} ? $args{after_uid} : 0;
+  my $limit = exists $args{limit}     ? $args{limit}     : 100;
+  _mailbox_integer($after, 0, 4_294_967_295);
+  _mailbox_integer($limit, 1, 1_000);
+  return $self->_transaction(
+    sub {
+      return $self->_dbh->selectall_arrayref(
+'SELECT uid, entry_id, content_sha256, received_at FROM mailbox_entries WHERE mailbox_id = ? AND uid > ? ORDER BY uid LIMIT ?',
+        {Slice => {}}, $args{mailbox_id}, $after, $limit,
+      );
+    }
+  );
+}
+
+sub load_mailbox_uid {
+  my ($self, %args) = @_;
+  _mailbox_token($args{mailbox_id});
+  _mailbox_integer($args{uid}, 1, 4_294_967_295);
+  return $self->_transaction(
+    sub {
+      my $row = $self->_dbh->selectrow_hashref(
+        'SELECT uid, entry_id, content_sha256, received_at FROM mailbox_entries WHERE mailbox_id = ? AND uid = ?',
+        undef, $args{mailbox_id}, $args{uid},);
       return if !$row;
       return {%{$row}, message => $self->_content($row->{content_sha256})};
     }
@@ -187,6 +278,53 @@ bytes through the existing shared storage path. All result shapes omit archive
 IDs, idempotency keys, sender and private envelope/other-recipient metadata.
 Opaque inbound MIME can itself contain Bcc text: this API never rewrites it.
 
+=head2 ensure_mailbox
+
+Requires C<mailbox_id>. Initializes durable empty mailbox state if absent and
+returns the same state fields as C<mailbox_state>. This is trusted storage
+initialization, not account creation or authorization. Receipt acceptance also
+initializes absent state in its existing custody transaction.
+
+=head2 mailbox_state
+
+Requires C<mailbox_id>. Returns C<uidvalidity>, C<uidnext> and C<message_count>,
+or nothing if no incoming mailbox has been initialized. Reads never create one.
+UIDVALIDITY and UIDNEXT are persistent, nonzero 32-bit values. UIDVALIDITY is
+allocated from a permanent store-wide counter; per-mailbox UIDNEXT starts at 1.
+New committed receipts advance UIDNEXT; exact replay and failed transactions do
+not. Empty initialization is idempotent, including under concurrent callers.
+
+=head2 mailbox_uid_entries
+
+Requires C<mailbox_id>. Optional C<after_uid> defaults to 0 and is a canonical
+integer from 0 through 4294967295. C<limit> defaults to 100, bounded 1 through
+1000. Returns receipt metadata plus C<uid>, ordered by ascending UID strictly
+after the cursor. Missing mailboxes return an empty array. No body is read.
+
+Each state or page call is a separate coherent snapshot. For this append-only
+model, capture UIDNEXT first, then page and retain only UIDs below that bound.
+The resulting immutable prefix matches the captured message count. This is not
+a session snapshot contract for future expunge or mailbox recreation.
+
+=head2 load_mailbox_uid
+
+Requires C<mailbox_id> and a canonical C<uid> from 1 through 4294967295. Returns
+receipt metadata plus C<uid> and exact RawMessage C<message>, or nothing if
+absent in that mailbox. Uses the same corruption checks as receipt-ID fetch.
+Private envelopes, receipt keys and other-recipient data are never projected.
+Global receipt entry IDs remain independent and are not IMAP UIDs.
+
+UID 4294967294 is the last allocated value: 4294967295 is reserved as terminal
+UIDNEXT. Further receipts fail without mutation; exact replay and reads remain
+available. There is no automatic rollover, reset, deletion or renumbering.
+The last UIDVALIDITY is 4294967295; exhaustion prevents new mailboxes but allows
+operations on existing ones. The internal allocator sentinel is 4294967296.
+Never reset or derive this allocator from currently surviving rows. Restoring
+older database history behind an already exposed IMAP identity is unsafe.
+Future recovery must preserve all exposed UID history or choose UIDVALIDITY
+above every previously exposed value; a rolled-back allocator cannot prove
+that bound. Fresh stores are not a safe replacement for existing identities.
+
 =head1 DIAGNOSTICS
 
 Invalid inputs, replay conflicts and storage failures throw value-free errors.
@@ -196,7 +334,8 @@ hash. Lower-level transaction failure and reopen rules are inherited from Store.
 =head1 CONFIGURATION AND ENVIRONMENT
 
 Uses Store's one DBI handle and existing serialized, durable transactions.
-No environment, network, authentication, route or mailbox provisioning is added.
+No environment, network, authentication or route is added. Empty mailbox storage
+state may be initialized explicitly; this never provisions an account.
 
 =head1 DEPENDENCIES
 
@@ -204,13 +343,13 @@ Moo::Role, strictures, Carp and Scalar::Util; shared Store supplies persistence.
 
 =head1 INCOMPATIBILITIES
 
-Requires SQLite mail schema 4 or PostgreSQL mail schema 2. Prior schemas are
+Requires SQLite mail schema 5 or PostgreSQL mail schema 3. Prior schemas are
 rejected unchanged; no implicit migration or adoption of archive rows occurs.
 
 =head1 BUGS AND LIMITATIONS
 
 This is a single incoming mailbox collection per caller-selected mailbox ID.
-Folders, flags, expunge, UIDVALIDITY, IMAP UIDs, account authorization, quotas,
+Folders, flags, expunge, account authorization, quotas,
 network receive adapters and backup/restore tooling remain unimplemented.
 A future ordinary-client adapter must use this same authority or an explicit
 reviewed migration. A second independently authoritative mailbox is prohibited.

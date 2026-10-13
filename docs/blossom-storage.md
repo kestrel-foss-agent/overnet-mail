@@ -66,8 +66,8 @@ unimplemented. Do not broadly delete temporary files while uploads are active.
 
 ## Schema and supported backends
 
-New mail databases use application ID 1330463049 and schema version 4. Old
-version-1, version-2 and version-3 mail databases are rejected unchanged. Existing foreign
+New mail databases use application ID 1330463049 and schema version 5. Old
+version-1, version-2, version-3 and version-4 mail databases are rejected unchanged. Existing foreign
 or standalone Blossom databases are also rejected; this is component reuse,
 not an implicit adoption/migration of another application's data. Keep a verified
 backup and continue using the prior code until a reviewed migration exists.
