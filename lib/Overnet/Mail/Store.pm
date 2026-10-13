@@ -78,7 +78,7 @@ sub _initialize {
   my $dbh         = $self->_dbh;
   my $version     = $dbh->selectrow_array('PRAGMA user_version');
   my $application = $dbh->selectrow_array('PRAGMA application_id');
-  return if $version == 4 && $application == 1_330_463_049;
+  return if $version == 5 && $application == 1_330_463_049;
   my $tables = $dbh->selectrow_array('SELECT COUNT(*) FROM sqlite_master');
   if ($version || $application || $tables) {
     croak 'unsupported mail store schema';
@@ -87,7 +87,7 @@ sub _initialize {
   $self->_metadata_store->deploy_schema;
   $self->_deploy_mail_tables('INTEGER PRIMARY KEY AUTOINCREMENT', 'INTEGER');
   $dbh->do('PRAGMA application_id = 1330463049');
-  $dbh->do('PRAGMA user_version = 4');
+  $dbh->do('PRAGMA user_version = 5');
   return;
 }
 
@@ -608,8 +608,8 @@ messages. RFC Message-ID is opaque message content and has no uniqueness role.
 Accepts named arguments or a hash reference. Required C<path> is an absolute local
 filename without semicolons or controls. The parent directory must exist and be
 private to the application. New or empty databases are initialized; unknown
-schema versions and nonempty foreign databases are rejected. Schema version 4
-rejects prior mail versions 1, 2 and 3 without migration or alteration. For PostgreSQL,
+schema versions and nonempty foreign databases are rejected. Schema version 5
+rejects prior mail versions 1, 2, 3 and 4 without migration or alteration. For PostgreSQL,
 use L<Overnet::Mail::Store::Postgres>. Filesystem and S3 backends are not supported
 by this adapter.
 
@@ -719,6 +719,26 @@ See L<Overnet::Mail::Store::Mailbox/mailbox_entries>.
 Fetches a recipient entry without sender-private envelope fields.
 See L<Overnet::Mail::Store::Mailbox/load_mailbox_entry>.
 
+=head2 ensure_mailbox
+
+Initializes trusted empty incoming mailbox storage state without creating an
+account. See L<Overnet::Mail::Store::Mailbox/ensure_mailbox>.
+
+=head2 mailbox_state
+
+Reads durable UIDVALIDITY, UIDNEXT and message count for one mailbox.
+See L<Overnet::Mail::Store::Mailbox/mailbox_state>.
+
+=head2 mailbox_uid_entries
+
+Lists bounded UID-ordered incoming metadata.
+See L<Overnet::Mail::Store::Mailbox/mailbox_uid_entries>.
+
+=head2 load_mailbox_uid
+
+Fetches exact incoming bytes by mailbox-local UID.
+See L<Overnet::Mail::Store::Mailbox/load_mailbox_uid>.
+
 =head2 disconnect
 
 Disconnects; repeated calls are harmless. Further acceptance and reads fail.
@@ -743,7 +763,7 @@ Perl 5.40, strictures, Moo, DBI, DBD::SQLite, Digest::SHA and JSON.
 
 =head1 INCOMPATIBILITIES
 
-SQLite schema version 4 only; prior versions are rejected without changing
+SQLite schema version 5 only; prior versions are rejected without changing
 their data. No migration or external blob store is implemented. Use a supported local SQLite filesystem; network filesystems are outside
 this contract. Durability depends on SQLite, its VFS, filesystem and hardware.
 Process-interruption tests are not power-loss or hardware-failure certification.

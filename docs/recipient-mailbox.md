@@ -102,8 +102,8 @@ collection, quota or retention policy is added.
 
 ## Schema and validation
 
-New SQLite databases use application ID 1330463049 and schema version 4. New
-PostgreSQL mail schemas use independent version 2. Prior versions are rejected
+New SQLite databases use application ID 1330463049 and schema version 5. New
+PostgreSQL mail schemas use independent version 3. Prior versions are rejected
 unchanged. There is no implicit migration, mailbox inference or promotion of old
 archive records. Preserve a verified backup and use prior code for old stores
 until an explicit reviewed migration exists. PostgreSQL still requires separate
@@ -120,8 +120,9 @@ not PostgreSQL evidence.
 ## Ordinary-client milestone still ahead
 
 This establishes a single incoming collection per selected mailbox. It does not
-implement folders, flags, expunge, UIDVALIDITY, IMAP UID allocation, account
-provisioning or ordinary-client retrieval. No compatibility-matrix row becomes
+implement folders, flags, expunge, account provisioning or ordinary-client
+retrieval. The subsequent [IMAP identifier layer](imap-identifiers.md) adds durable
+UIDVALIDITY, UIDNEXT and per-mailbox UIDs without changing these receipt APIs. No compatibility-matrix row becomes
 end-to-end verified merely from these tests.
 
 The next integration must use a maintained IMAP server's supported backend
