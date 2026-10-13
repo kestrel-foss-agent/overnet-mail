@@ -90,9 +90,12 @@ It does not introduce an Overnet mailbox backend or deploy a mail service.
 The [recipient mailbox foundation](docs/recipient-mailbox.md) now atomically
 receives, lists and fetches durable incoming entries without exposing private
 outbound envelopes. The [durable IMAP identifier layer](docs/imap-identifiers.md)
-adds UIDVALIDITY, UIDNEXT and mailbox-local UIDs. These remain trusted local APIs;
-ordinary-client IMAP, identity/routing and production transport adapters remain
-ahead, followed by tested native and Internet interoperability. Reuse maintained CPAN libraries and
+adds UIDVALIDITY, UIDNEXT and mailbox-local UIDs. A
+[read-only Dovecot integration lab](lab/readonly-imap/README.md) now connects those
+Store APIs to a pinned mature IMAP parser through local pipes, with synthetic
+SQLite/PostgreSQL tests. It opens no IMAP listener and implements no login or
+account mapping. Identity/routing, deployment, and broad ordinary-client
+interoperability remain ahead. Reuse maintained CPAN libraries and
 existing MTA and mailbox servers instead of implementing their protocols from scratch.
 
 ## License

@@ -1,0 +1,58 @@
+name: Read-only Dovecot integration
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  readonly-imap:
+    name: Dovecot 2.4.5 with SQLite and PostgreSQL
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: overnet_mail_imap_test
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 127.0.0.1:5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d overnet_mail_imap_test"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      OVERNET_TEST_PG_DSN: 'dbi:Pg:dbname=overnet_mail_imap_test;host=127.0.0.1;port=5432'
+      OVERNET_TEST_PG_USER: postgres
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: shogo82148/actions-setup-perl@53e33bb27be492a926eee378e8a5f7ff6618b061 # v1.43.1
+        with:
+          perl-version: '5.40'
+      - name: Install native build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgmp-dev libpq-dev build-essential pkg-config libssl-dev libpcre2-dev zlib1g-dev
+      - name: Prepare Linux syscall definitions
+        run: |
+          bash scripts/prepare-syscall-headers.sh "$RUNNER_TEMP/overnet-syscall"
+          echo "PERL5LIB=$RUNNER_TEMP/overnet-syscall${PERL5LIB:+:$PERL5LIB}" >> "$GITHUB_ENV"
+      - name: Install Store and Blossom dependencies
+        run: cpanm --installdeps .
+      - name: Build pinned official Dovecot release and local plugin
+        run: |
+          lab/readonly-imap/bootstrap-dovecot.sh "$RUNNER_TEMP/dovecot-245"
+          lab/readonly-imap/build-plugin.sh "$RUNNER_TEMP/dovecot-245/runtime" "$RUNNER_TEMP/overnet-imap-plugin"
+      - name: Check bounded IPC and malicious helper responses
+        run: |
+          python3 lab/readonly-imap/test-bridge.py
+          python3 lab/readonly-imap/test-protocol.py --prefix "$RUNNER_TEMP/dovecot-245/runtime" --plugin-dir "$RUNNER_TEMP/overnet-imap-plugin"
+      - name: Real SQLite Store and Blossom through IMAP pipes
+        run: |
+          python3 lab/readonly-imap/test-readonly.py --prefix "$RUNNER_TEMP/dovecot-245/runtime" --plugin-dir "$RUNNER_TEMP/overnet-imap-plugin" --engine sqlite
+      - name: Required real PostgreSQL Store and Blossom through IMAP pipes
+        run: |
+          python3 lab/readonly-imap/test-readonly.py --prefix "$RUNNER_TEMP/dovecot-245/runtime" --plugin-dir "$RUNNER_TEMP/overnet-imap-plugin" --engine postgres
