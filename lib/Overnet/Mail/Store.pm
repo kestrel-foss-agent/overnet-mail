@@ -26,6 +26,8 @@ has _dbh              => (is => 'ro', init_arg => undef);
 has _blob_store       => (is => 'ro', init_arg => undef);
 has _metadata_store   => (is => 'ro', init_arg => undef);
 
+with 'Overnet::Mail::Store::Mailbox';
+
 sub BUILD {
   my ($self) = @_;
   my $limit = $self->max_message_bytes;
@@ -76,7 +78,7 @@ sub _initialize {
   my $dbh         = $self->_dbh;
   my $version     = $dbh->selectrow_array('PRAGMA user_version');
   my $application = $dbh->selectrow_array('PRAGMA application_id');
-  return if $version == 3 && $application == 1_330_463_049;
+  return if $version == 4 && $application == 1_330_463_049;
   my $tables = $dbh->selectrow_array('SELECT COUNT(*) FROM sqlite_master');
   if ($version || $application || $tables) {
     croak 'unsupported mail store schema';
@@ -85,7 +87,7 @@ sub _initialize {
   $self->_metadata_store->deploy_schema;
   $self->_deploy_mail_tables('INTEGER PRIMARY KEY AUTOINCREMENT', 'INTEGER');
   $dbh->do('PRAGMA application_id = 1330463049');
-  $dbh->do('PRAGMA user_version = 3');
+  $dbh->do('PRAGMA user_version = 4');
   return;
 }
 
@@ -143,6 +145,7 @@ DELIVERIES
   ) {
     $dbh->do($sql);
   }
+  $self->_deploy_mailbox_tables($primary_key, $integer);
   return;
 }
 
@@ -405,7 +408,8 @@ sub _store_content {
     return;
   }
   if ( $dbh->selectrow_array('SELECT 1 FROM messages WHERE content_sha256 = ? LIMIT 1', undef, $sha)
-    || $dbh->selectrow_array('SELECT 1 FROM blossom_blob_data WHERE storage_key = ?', undef, $sha)) {
+    || $dbh->selectrow_array('SELECT 1 FROM mailbox_entries WHERE content_sha256 = ? LIMIT 1', undef, $sha)
+    || $dbh->selectrow_array('SELECT 1 FROM blossom_blob_data WHERE storage_key = ?',          undef, $sha)) {
     croak 'stored content is missing';
   }
   my $ok = eval {
@@ -604,8 +608,8 @@ messages. RFC Message-ID is opaque message content and has no uniqueness role.
 Accepts named arguments or a hash reference. Required C<path> is an absolute local
 filename without semicolons or controls. The parent directory must exist and be
 private to the application. New or empty databases are initialized; unknown
-schema versions and nonempty foreign databases are rejected. Schema version 3
-rejects prior mail versions 1 and 2 without migration or alteration. For PostgreSQL,
+schema versions and nonempty foreign databases are rejected. Schema version 4
+rejects prior mail versions 1, 2 and 3 without migration or alteration. For PostgreSQL,
 use L<Overnet::Mail::Store::Postgres>. Filesystem and S3 backends are not supported
 by this adapter.
 
@@ -700,6 +704,21 @@ fields, a RawMessage in C<message>, and an Envelope in C<envelope> for submissio
 the returned envelope can include blind recipients. Never expose it to recipients.
 Content and envelope integrity are checked before returning a record.
 
+=head2 receive_message
+
+Atomically commits immutable inbound bytes and recipient mailbox membership.
+See L<Overnet::Mail::Store::Mailbox/receive_message> for the trusted-caller contract.
+
+=head2 mailbox_entries
+
+Lists bounded recipient membership metadata in durable cursor order.
+See L<Overnet::Mail::Store::Mailbox/mailbox_entries>.
+
+=head2 load_mailbox_entry
+
+Fetches a recipient entry without sender-private envelope fields.
+See L<Overnet::Mail::Store::Mailbox/load_mailbox_entry>.
+
 =head2 disconnect
 
 Disconnects; repeated calls are harmless. Further acceptance and reads fail.
@@ -724,7 +743,7 @@ Perl 5.40, strictures, Moo, DBI, DBD::SQLite, Digest::SHA and JSON.
 
 =head1 INCOMPATIBILITIES
 
-SQLite schema version 3 only; prior versions are rejected without changing
+SQLite schema version 4 only; prior versions are rejected without changing
 their data. No migration or external blob store is implemented. Use a supported local SQLite filesystem; network filesystems are outside
 this contract. Durability depends on SQLite, its VFS, filesystem and hardware.
 Process-interruption tests are not power-loss or hardware-failure certification.
@@ -732,7 +751,7 @@ Process-interruption tests are not power-loss or hardware-failure certification.
 =head1 BUGS AND LIMITATIONS
 
 No authentication, authorization, relay policy, network delivery, message flags,
-mailbox listing, deletion, quotas, encryption or backup API. Mailbox-scoped lookup
+folder management, deletion, quotas, encryption or backup API. Mailbox-scoped lookup
 is not authorization. Trusted callers must authorize every operation and protect
 the database and journal files. Logical IDs are local to this database, not global
 transport IDs. Content hashes and IDs are not access credentials. Direct private

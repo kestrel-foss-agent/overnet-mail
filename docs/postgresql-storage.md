@@ -124,3 +124,12 @@ modules but could not create Unix-domain sockets, including with its normal
 escalation flow. Consequently local validation is explicitly limited to static
 checks and SQLite regression; real PostgreSQL evidence comes from the exact
 branch/PR CI runs. Process crash tests are not power-loss or hardware tests.
+
+## Recipient mailbox schema
+
+The [recipient mailbox foundation](recipient-mailbox.md) raises the independent
+PostgreSQL mail schema version from 1 to 2. It adds recipient membership directly
+referencing both Blossom tables and inherits the same receive/list/fetch API as
+SQLite. Version 1 is rejected unchanged; no implicit migration is performed.
+Receipt-only references protect content, and real PostgreSQL tests exercise
+atomic receipt recovery and concurrent replay.

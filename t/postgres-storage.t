@@ -63,7 +63,7 @@ subtest 'all octets and upstream shared-handle interoperability' => sub {
   is refaddr($store->dbh),                  refaddr($dbh), 'constructor preserves the supplied handle';
   is refaddr($store->_blob_store->dbh),     refaddr($dbh), 'upstream bytes share the mail transaction handle';
   is refaddr($store->_metadata_store->dbh), refaddr($dbh), 'upstream metadata shares the mail transaction handle';
-  is $dbh->selectrow_array('SELECT version FROM overnet_mail_schema'), 1, 'PostgreSQL schema version is explicit';
+  is $dbh->selectrow_array('SELECT version FROM overnet_mail_schema'), 2, 'PostgreSQL schema version is explicit';
   is $dbh->selectrow_array(
     "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = ? AND table_name = 'contents'",
     undef, $fixture->{schema}),
@@ -561,7 +561,7 @@ subtest 'empty, partial, and unknown mail schema versions are rejected' => sub {
       'mail_view',
       sub {
         $_[0]->do('DROP TABLE overnet_mail_schema');
-        $_[0]->do('CREATE VIEW overnet_mail_schema AS SELECT 1 AS version');
+        $_[0]->do('CREATE VIEW overnet_mail_schema AS SELECT 2 AS version');
       }
     ],
     ['version_empty', sub { $_[0]->do('DELETE FROM overnet_mail_schema') }],
@@ -569,14 +569,14 @@ subtest 'empty, partial, and unknown mail schema versions are rejected' => sub {
       'version_unknown',
       sub {
         $_[0]->do('ALTER TABLE overnet_mail_schema DROP CONSTRAINT overnet_mail_schema_version_check');
-        $_[0]->do('UPDATE overnet_mail_schema SET version = 2');
+        $_[0]->do('UPDATE overnet_mail_schema SET version = 3');
       }
     ],
     [
       'version_multiple',
       sub {
         $_[0]->do('ALTER TABLE overnet_mail_schema DROP CONSTRAINT overnet_mail_schema_version_check');
-        $_[0]->do('INSERT INTO overnet_mail_schema (version) VALUES (2)');
+        $_[0]->do('INSERT INTO overnet_mail_schema (version) VALUES (3)');
       }
     ],
   ) {
@@ -588,7 +588,7 @@ subtest 'empty, partial, and unknown mail schema versions are rejected' => sub {
       || $mutation->[0] eq 'mail_unlogged' ? qr/unsupported mail store durability/ : qr/unsupported mail store schema/;
     like dies { reopen($fixture) }, $expected, 'incomplete or unsupported mail schema has no implicit migration';
     if ($mutation->[0] eq 'mail_view') {
-      is $fixture->{dbh}->selectrow_array('SELECT version FROM overnet_mail_schema'), 1,
+      is $fixture->{dbh}->selectrow_array('SELECT version FROM overnet_mail_schema'), 2,
         'rejected marker view retains its original value';
       is $fixture->{dbh}->selectrow_array(
 'SELECT c.relkind FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = ? AND c.relname = ?',

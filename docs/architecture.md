@@ -52,3 +52,12 @@ must be designed with the authoritative store, before production readiness.
    Internet paths with attachments, Bcc and offline delivery.
 3. Complete IMAP/POP/JMAP/Sieve, migration and client-feature scope as approved.
 4. Production abuse controls, fuzz/load tests, backups and recovery validation.
+
+## Recipient mailbox foundation
+
+The [local recipient mailbox API](recipient-mailbox.md) chooses the existing
+shared SQL database as authority for incoming membership and immutable Blossom
+content. It is independent of sender archives/private envelopes. A future mature
+IMAP server integration must adapt to this same authority or explicitly migrate
+it; no second independent mailbox state is introduced. Authentication, receipt
+routing and IMAP state semantics are still separate unimplemented boundaries.

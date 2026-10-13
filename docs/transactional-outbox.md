@@ -104,10 +104,10 @@ mail data under the existing local storage contract.
 
 ## Versioning and verification
 
-New databases use schema version 3. Version 1 and 2 databases are rejected without
+New databases use schema version 4. Version 1, 2 and 3 databases are rejected without
 changing their schema, messages, BLOB bytes, envelope or markers. There is no
 implicit migration or retroactive enqueue. Keep using the preceding code for
-existing version-1 or version-2 data until an explicit backed-up migration is implemented;
+existing version-1, version-2 or version-3 data until an explicit backed-up migration is implemented;
 do not relabel the version marker or create a replacement database over old data.
 The same marker-only recognition limitation documented for local storage remains.
 

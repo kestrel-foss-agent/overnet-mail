@@ -11,7 +11,7 @@ my $store = Overnet::Mail::Store->new(path => "$dir/shared.db");
 my $raw   = Overnet::Mail::RawMessage->new(raw_bytes => "Subject: shared storage\r\n\r\n\0\xffbytes");
 is refaddr($store->_metadata_store->dbh), refaddr($store->_dbh), 'metadata uses the mail database handle';
 is refaddr($store->_blob_store->dbh),     refaddr($store->_dbh), 'bytes use the same database handle';
-is $store->_dbh->selectrow_array('PRAGMA user_version'), 3,      'shared storage has an explicit schema version';
+is $store->_dbh->selectrow_array('PRAGMA user_version'), 4,      'shared storage has an explicit schema version';
 is $store->_dbh->selectrow_array(q{SELECT COUNT(*) FROM sqlite_master WHERE name = 'contents'}), 0,
   'no duplicate mail byte store remains';
 
