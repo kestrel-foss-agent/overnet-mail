@@ -17,8 +17,8 @@ It delegates the documented [Net::Cmd response hooks](https://metacpan.org/pod/N
 and distinguishes complete, consistent peer replies from local synthetic errors.
 The adapter is not a strict SMTP grammar validator beyond those observations.
 
-The adapter accepts only `port` (1024–65535) and a per-I/O `timeout` (1–30 seconds,
-default 2). Fixtures bind 127.0.0.1 on port zero and pass the OS-assigned port.
+The adapter accepts `port` (1024–65535), a per-I/O `timeout` (1–30 seconds,
+default 2), and total `attempt_seconds` (1–30 seconds, default 10). Fixtures bind 127.0.0.1 on port zero and pass the OS-assigned port.
 The destination is hardcoded to 127.0.0.1; no hostnames, alternative addresses,
 Net::Config default hosts, recipient-domain resolution or DNS rebinding path.
 Unknown options are rejected, including credentials, TLS, host and debug options.
@@ -103,11 +103,65 @@ The queue's existing attempt cap, lease expiry and fencing still apply. Tests
 exercise this mapping against an isolated SQLite database, with delivered, failed
 and uncertain siblings and unchanged persisted message bytes.
 
-A per-I/O timeout is not a whole-attempt deadline: a slow-drip peer can prolong an
-exchange. This prototype has no lease renewal or execution supervisor. Production
-work must bound total I/O time against a lease and retain ambiguity when a worker
-or acknowledgement is lost. Local fencing cannot stop an already-started remote
-send, and retrying uncertain delivery can duplicate mail.
+## Total SMTP attempt deadline
+
+Per-I/O timeouts alone cannot bound a trickling peer. Each valid call now runs
+libnet in one isolated Unix child with a total `attempt_seconds` budget. Core
+`Time::HiRes` supplies a monotonic parent deadline; `IO::Select` supervises a
+bounded evidence pipe. A separate child-only high-resolution alarm uses the
+kernel's default SIGALRM action, explicitly unblocked even if the caller blocked
+it. It terminates the child without Perl exception handling or destructors if
+the parent dies or libnet stalls. The caller's alarm and handlers are not changed. Catchable signals are briefly
+blocked while acquiring child ownership and during stop/reap/drain/close; the
+original signal mask is restored before returning or rethrowing an exception. Existing CPAN libnet continues to own all SMTP syntax and framing;
+this helper only supervises the process, not the protocol.
+
+The absolute deadline starts on entry to `deliver`. Trusted local claim/privacy
+and wire validation run before the fork; their elapsed time is deducted. If
+validation consumes the budget, no SMTP connection starts. Validation is bounded
+by the existing message limits but is not CPU-preempted: this is an SMTP/I/O
+budget, not a hard whole-method runtime guarantee for arbitrary overridden code.
+Connect, greeting, replies (including partial lines and multiline trickles),
+body writes, final acknowledgement and socket cleanup all share the same budget.
+No stage resets it. The per-I/O timeout still applies independently.
+
+Before body bytes are allowed, the child must successfully write a small stage
+record. A final outcome is written before cleanup. On expiry/interruption the
+parent kills and reaps its exact child, then drains all buffered evidence before
+classifying: queued body-start evidence cannot be missed, and communicated final
+250/4xx/5xx evidence survives stalled cleanup. Missing final evidence after body
+start remains uncertain even if the peer accepted it. Incomplete/corrupt evidence
+or IPC read errors cannot establish safe non-delivery. No automatic retry occurs.
+
+This API requires a single-threaded Unix caller owning its child reaping.
+SIGCHLD must be default, without `SA_NOCLDWAIT`; ignored/custom handlers are
+rejected before network I/O rather than replaced. Concurrent external waiters or
+changes to signal ownership are unsupported. The child never accesses an
+inherited database connection and exits using `POSIX::_exit` on every path,
+skipping inherited DBI disconnects/rollbacks, object destructors and END blocks.
+Inherited descriptors remain open until kernel exit; the parent is blocked during
+this interval. The production callback neither forks descendants nor launches
+external commands. An ordinary throwing caller handler cannot strand a child
+between fork and ownership acquisition or interrupt reaping. Ownership is cleared
+before restoring the mask, so a pending handler runs after resources are settled.
+A single cleanup retry covers a finite exception racing the guard; arbitrary
+repeated asynchronous exceptions are unsupported. Caller exceptions are rethrown
+unchanged after cleanup, never copied into outcome reports; the runner still
+maps an uncaught transport exception to uncertainty. Operating-system failures
+while blocking/restoring masks are reported, not claimed to preserve the mask. Direct calls to the internal process helper are unsupported.
+
+The implementation/tests target Linux. Scheduling delays, process creation and
+uninterruptible kernel waits are not hard real-time guarantees. A terminated
+parent can lose the child's custody evidence; normal lease-expiry ambiguity
+still applies. Neither this deadline nor local fencing can recall sent bytes.
+
+This change deliberately preserves the runner API and existing lease behavior.
+A trusted caller must choose a lease longer than `attempt_seconds` plus claim,
+validation, scheduling and durable-settlement margins. There is no automatic
+lease-derived cap, renewal, or atomic relationship between monotonic time and
+the runner's integer Unix clock. A short lease can still expire during an attempt;
+fencing continues to reject late completion. Precise lease-aware execution is a
+separate boundary, not an exactly-once claim.
 
 Existing mature MTAs must own Internet routing, downstream SMTP retry/backoff,
 queueing and DSN/bounce processing. The application outbox tracks the handoff to

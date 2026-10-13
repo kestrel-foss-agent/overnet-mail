@@ -195,7 +195,8 @@ Perl 5.40, strictures 2, Moo, Store and the existing LoopbackSMTP adapter.
 
 =head1 INCOMPATIBILITIES
 
-Not a production worker. No total I/O deadline, supervisor, lease renewal,
+Not a production worker. The adapter has an independent total I/O deadline,
+but no lease-derived budget, operational supervisor, lease renewal,
 authentication, TLS, Internet routing, downstream retries or DSN processing.
 
 =head1 BUGS AND LIMITATIONS

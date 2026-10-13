@@ -40,6 +40,10 @@ jobs:
           perl-version: ${{ matrix.perl }}
       - name: Install native CPAN prerequisite
         run: sudo apt-get update && sudo apt-get install -y libgmp-dev libpq-dev
+      - name: Prepare Linux orphan-test syscall definitions
+        run: |
+          bash scripts/prepare-syscall-headers.sh "$RUNNER_TEMP/overnet-syscall"
+          echo "PERL5LIB=$RUNNER_TEMP/overnet-syscall${PERL5LIB:+:$PERL5LIB}" >> "$GITHUB_ENV"
       - name: Install CPAN and pinned local style dependencies
         run: bash scripts/install-deps.sh
       - name: Normal and author tests
@@ -76,6 +80,10 @@ jobs:
           perl-version: '5.40'
       - name: Install native CPAN prerequisite
         run: sudo apt-get update && sudo apt-get install -y libgmp-dev libpq-dev
+      - name: Prepare Linux orphan-test syscall definitions
+        run: |
+          bash scripts/prepare-syscall-headers.sh "$RUNNER_TEMP/overnet-syscall"
+          echo "PERL5LIB=$RUNNER_TEMP/overnet-syscall${PERL5LIB:+:$PERL5LIB}" >> "$GITHUB_ENV"
       - name: Install CPAN and pinned local style dependencies
         run: bash scripts/install-deps.sh
       - name: Fail-closed per-file coverage gate
