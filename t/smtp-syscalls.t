@@ -102,9 +102,11 @@ for my $where (qw(collect drain)) {
   like dies { attempt() }, qr/read failed/, 'collection and drain errors cannot imply no body was sent';
 }
 {
-  my $read = mock $module => (override => [_read => sub { return 'x' x 1_025; }]);
+  my $calls = 0;
+  my $read = mock $module => (override => [_read => sub { return ++$calls == 1 ? 'x' x 1_025 : undef; }]);
   is attempt(), {outcome => 'uncertain', stage => 'connect', smtp_code => undef},
     'oversize evidence is bounded and uncertain';
+  is $calls, 1, 'neither collection nor cleanup reads beyond the evidence cap';
 }
 {
   my $collect = mock $module => (override => [_collect => sub { return q{}; }]);
@@ -158,8 +160,16 @@ for my $error (qw(fail short)) {
 }
 {
   my $signals = mock 'POSIX' => (override => [sigprocmask => sub { return; }]);
-  like dies { Overnet::Mail::Transport::Attempt::_block() }, qr/signal guard unavailable/,
+  like dies { Overnet::Mail::Transport::Attempt::_block({}) }, qr/signal guard unavailable/,
     'failed guard installation is explicit';
+}
+{
+  my $calls = 0;
+  my $signals = mock 'POSIX' => (override => [sigprocmask => sub { return ++$calls == 1 ? 1 : undef; }]);
+  my $state = {};
+  like dies { Overnet::Mail::Transport::Attempt::_block($state) }, qr/signal guard unavailable/,
+    'failure to block after the read-only mask query is explicit';
+  ok defined $state->{mask}, 'the original mask is recorded before blocking is attempted';
 }
 for my $persistent (0, 1) {
   my $calls = 0;
@@ -231,6 +241,35 @@ for my $where (qw(before_guard reap after_restore repeated_guard)) {
   is $state->{bytes}, "stage body -\n", 'cleanup retains queued evidence before EOF';
   ok $state->{complete}, 'cleanup marks all owned resources settled before restoring signals';
   ok !defined fileno($reader) && !defined fileno($writer), 'both pipe ends are closed';
+}
+
+for my $where (1, 2) {
+  my $original = POSIX::SigSet->new;
+  POSIX::sigprocmask(POSIX::SIG_BLOCK(), POSIX::SigSet->new(POSIX::SIGUSR1()), $original)
+    or die 'test signal setup failed';
+  my $real   = \&POSIX::sigprocmask;
+  my $blocks = 0;
+  my $error;
+  {
+    my $signals = mock 'POSIX' => (
+      override => [
+        sigprocmask => sub {
+          my ($how, $set) = @_;
+          my $result = $real->(@_);
+          if ($how == POSIX::SIG_BLOCK() && $set->ismember(POSIX::SIGALRM()) && ++$blocks == $where) {
+            die "queued caller exception after blocking\n";
+          }
+          return $result;
+        }
+      ]
+    );
+    $error = dies { attempt() };
+  }
+  my $after = POSIX::SigSet->new;
+  POSIX::sigprocmask(POSIX::SIG_SETMASK(), $original, $after) or die 'test signal restore failed';
+  is $error, "queued caller exception after blocking\n", 'an already queued callback keeps its original exception';
+  is $after->ismember(POSIX::SIGALRM()), 0,              'post-block exception does not strand caller alarms blocked';
+  is $after->ismember(POSIX::SIGUSR1()), 1,              'post-block exception retains an unrelated preblocked signal';
 }
 
 alarm 0;

@@ -23,7 +23,7 @@ sub run {
   my $ok    = eval {
 
     # Record child ownership before allowing a caller handler to throw.
-    $state->{mask} = _block();
+    _block($state);
     my $pid = fork;
     croak 'delivery supervision unavailable' if !defined $pid;
     if (!$pid) {
@@ -60,11 +60,21 @@ sub _rethrow {
 }
 
 sub _block {
+  my ($state) = @_;
+  if (!defined $state->{mask}) {
+
+    # Query without changing the mask, then publish recovery state BEFORE the
+    # blocking syscall. A queued Perl safe-signal callback may throw immediately
+    # after that syscall even though the kernel now blocks future signals.
+    my $original = POSIX::SigSet->new;
+    POSIX::sigprocmask(SIG_BLOCK, POSIX::SigSet->new, $original)
+      or croak 'delivery signal guard unavailable';
+    $state->{mask} = $original;
+  }
   my $signals = POSIX::SigSet->new;
   $signals->fillset;
-  my $original = POSIX::SigSet->new;
-  POSIX::sigprocmask(SIG_BLOCK, $signals, $original) or croak 'delivery signal guard unavailable';
-  return $original;
+  POSIX::sigprocmask(SIG_BLOCK, $signals) or croak 'delivery signal guard unavailable';
+  return $state->{mask};
 }
 
 sub _restore {
@@ -76,10 +86,8 @@ sub _restore {
 
 sub _cleanup {
   my ($state) = @_;
-  my $mask = _block();
+  my $mask = _block($state);
 
-  # A fork/startup exception may have left the caller's original mask pending.
-  if (defined $state->{mask}) { $mask = $state->{mask}; }
   my $ok = eval {
     if (defined $state->{pid}) {
       _stop($state->{pid});
@@ -110,6 +118,7 @@ sub _cleanup {
   $state->{complete} = !defined $state->{pid} && !defined fileno($state->{reader}) && !defined fileno($state->{writer});
   my $restored      = eval { _restore($mask); 1 };
   my $restore_error = $EVAL_ERROR;
+  if ($restored) { $state->{mask} = undef; }
   return _rethrow($error)         if !$ok;
   return _rethrow($restore_error) if !$restored;
   return;
