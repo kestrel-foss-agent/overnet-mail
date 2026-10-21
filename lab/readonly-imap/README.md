@@ -55,6 +55,36 @@ plugin executes that wrapper by an absolute filename, with a config filename as
 one argument; no shell or command-string interpolation is involved. Python uses
 standard-library `imaplib` with direct `Popen(argv, shell=False)` stream setup.
 
+## Incoming delivery and client independence
+
+The synthetic writer fixture now exercises the Store incoming boundary before
+retrieval: it explicitly provisions a mailbox with `ensure_mailbox`, registers
+an append-only recipient route with `register_recipient`, and calls
+`receive_delivery` with a recipient, local source identity, stable delivery key,
+timestamp, and original bytes. This is not an SMTP/LMTP receiver or an MTA adapter.
+No network ingress, login, credentials, or account authorization is added.
+
+The real-engine tests check that:
+
+- The routed mailbox, not visible To headers, receives the message. A separate
+  mailbox's independent Dovecot process fetches only that mailbox's bytes.
+- Domain-case variants replay the same receipt without allocating another UID;
+  local-part case remains significant.
+- An unknown recipient returns `unknown_recipient` without changing any fixture
+  table's row count or the mailbox state. After a route is registered, the same
+  delivery identity can be received for the first time.
+- Direct receipts, distinct incoming sources, and distinct recipient routes
+  retain separate receipt/UID identities even when keys and message bytes match.
+- Two independent IMAP processes can refresh and read the same immutable mail.
+  Mail arriving while one or both are disconnected remains fetchable after
+  reconnect, with stable UIDVALIDITY, UIDs, original timestamps, and exact
+  compliant MIME bytes. Replay after reconnection still creates no new UID.
+
+These are separate protocol sessions using Python's standard-library client,
+not a claim of compatibility with multiple GUI mail applications. The writable
+fixture is separate from the unchanged read-only retrieval helper and its
+two-command protocol.
+
 ## Storage and snapshot contract
 
 `store-helper.pl` calls only these existing Store read APIs:

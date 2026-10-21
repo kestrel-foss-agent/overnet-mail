@@ -26,7 +26,7 @@ has _dbh              => (is => 'ro', init_arg => undef);
 has _blob_store       => (is => 'ro', init_arg => undef);
 has _metadata_store   => (is => 'ro', init_arg => undef);
 
-with 'Overnet::Mail::Store::Mailbox';
+with 'Overnet::Mail::Store::Mailbox', 'Overnet::Mail::Store::Inbound';
 
 sub BUILD {
   my ($self) = @_;
@@ -78,7 +78,7 @@ sub _initialize {
   my $dbh         = $self->_dbh;
   my $version     = $dbh->selectrow_array('PRAGMA user_version');
   my $application = $dbh->selectrow_array('PRAGMA application_id');
-  return if $version == 5 && $application == 1_330_463_049;
+  return if $version == 6 && $application == 1_330_463_049;
   my $tables = $dbh->selectrow_array('SELECT COUNT(*) FROM sqlite_master');
   if ($version || $application || $tables) {
     croak 'unsupported mail store schema';
@@ -87,7 +87,7 @@ sub _initialize {
   $self->_metadata_store->deploy_schema;
   $self->_deploy_mail_tables('INTEGER PRIMARY KEY AUTOINCREMENT', 'INTEGER');
   $dbh->do('PRAGMA application_id = 1330463049');
-  $dbh->do('PRAGMA user_version = 5');
+  $dbh->do('PRAGMA user_version = 6');
   return;
 }
 
@@ -146,6 +146,7 @@ DELIVERIES
     $dbh->do($sql);
   }
   $self->_deploy_mailbox_tables($primary_key, $integer);
+  $self->_deploy_recipient_routes;
   return;
 }
 
@@ -608,8 +609,8 @@ messages. RFC Message-ID is opaque message content and has no uniqueness role.
 Accepts named arguments or a hash reference. Required C<path> is an absolute local
 filename without semicolons or controls. The parent directory must exist and be
 private to the application. New or empty databases are initialized; unknown
-schema versions and nonempty foreign databases are rejected. Schema version 5
-rejects prior mail versions 1, 2, 3 and 4 without migration or alteration. For PostgreSQL,
+schema versions and nonempty foreign databases are rejected. Schema version 6
+rejects prior mail versions 1, 2, 3, 4 and 5 without migration or alteration. For PostgreSQL,
 use L<Overnet::Mail::Store::Postgres>. Filesystem and S3 backends are not supported
 by this adapter.
 
@@ -763,7 +764,7 @@ Perl 5.40, strictures, Moo, DBI, DBD::SQLite, Digest::SHA and JSON.
 
 =head1 INCOMPATIBILITIES
 
-SQLite schema version 5 only; prior versions are rejected without changing
+SQLite schema version 6 only; prior versions are rejected without changing
 their data. No migration or external blob store is implemented. Use a supported local SQLite filesystem; network filesystems are outside
 this contract. Durability depends on SQLite, its VFS, filesystem and hardware.
 Process-interruption tests are not power-loss or hardware-failure certification.

@@ -119,19 +119,20 @@ receipt replay, and clean their own fixtures. Tests do not send external mail.
 Without a DSN, normal install tests skip PostgreSQL integration; the full
 per-module coverage gate still requires real database-backed execution to pass.
 
-The development cloud executor could install PostgreSQL 17.11 and the CPAN
-modules but could not create Unix-domain sockets, including with its normal
-escalation flow. Consequently local validation is explicitly limited to static
-checks and SQLite regression; real PostgreSQL evidence comes from the exact
-branch/PR CI runs. Process crash tests are not power-loss or hardware tests.
+Some restricted executors cannot create Unix-domain sockets. A disposable
+loopback-only PostgreSQL fixture can be used where supported; it must start, run
+tests and stop within the permitted execution lifecycle. Otherwise disclose the
+local test limitation and require real PostgreSQL evidence from the exact branch
+and PR CI runs. Process-crash tests are not power-loss or hardware tests.
 
 ## Recipient mailbox schema
 
 The [recipient mailbox foundation](recipient-mailbox.md) raises the independent
 PostgreSQL mail schema version from 1 to 2. It adds recipient membership directly
 referencing both Blossom tables and inherits the same receive/list/fetch API as
-SQLite. The [IMAP identifier layer](imap-identifiers.md) subsequently raises this
-to version 3, with durable mailbox state and local UIDs. Versions 1 and 2 are
-rejected unchanged; no implicit migration is performed.
+SQLite. The [IMAP identifier layer](imap-identifiers.md) subsequently introduced
+version 3 with durable mailbox state and local UIDs. The
+[recipient routing layer](recipient-routing.md) now requires version 4. Versions
+1, 2 and 3 are rejected unchanged; no implicit migration is performed.
 Receipt-only references protect content, and real PostgreSQL tests exercise
 atomic receipt recovery and concurrent replay.

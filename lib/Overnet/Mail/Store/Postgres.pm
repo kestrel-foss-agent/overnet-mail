@@ -81,16 +81,16 @@ q{SELECT COUNT(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace 
   if (JSON->new->encode($tables) ne $expected) {
     my @complete = (
       @blossom,
-      qw(deliveries mailbox_entries mailbox_uidvalidity mailboxes messages overnet_mail_schema recipients submissions)
+      qw(deliveries mailbox_entries mailbox_uidvalidity mailboxes messages overnet_mail_schema recipient_routes recipients submissions)
     );
     croak 'unsupported mail store schema' if JSON->new->encode($tables) ne JSON->new->encode([sort @complete]);
     my $versions = $dbh->selectcol_arrayref('SELECT version FROM overnet_mail_schema');
-    croak 'unsupported mail store schema' if @{$versions} != 1 || $versions->[0] != 3;
+    croak 'unsupported mail store schema' if @{$versions} != 1 || $versions->[0] != 4;
     return;
   }
   $self->_deploy_mail_tables('BIGINT GENERATED ALWAYS AS IDENTITY (MAXVALUE 999999999999999999) PRIMARY KEY', 'BIGINT');
-  $dbh->do('CREATE TABLE overnet_mail_schema (version INTEGER PRIMARY KEY CHECK (version = 3))');
-  $dbh->do('INSERT INTO overnet_mail_schema (version) VALUES (3)');
+  $dbh->do('CREATE TABLE overnet_mail_schema (version INTEGER PRIMARY KEY CHECK (version = 4))');
+  $dbh->do('INSERT INTO overnet_mail_schema (version) VALUES (4)');
   return;
 }
 
@@ -232,7 +232,7 @@ Overnet::Mail::Store, DBD::Pg and Net::Blossom::Server::Backend::Postgres 0.0010
 
 =head1 INCOMPATIBILITIES
 
-PostgreSQL mail schema version 3 is independent of SQLite schema versions.
+PostgreSQL mail schema version 4 is independent of SQLite schema versions.
 No cross-backend migration, deletion or external network service is provided.
 
 =head1 BUGS AND LIMITATIONS

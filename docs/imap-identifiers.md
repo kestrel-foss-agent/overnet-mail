@@ -89,8 +89,8 @@ projection; the SQL mailbox and Blossom bytes remain the only authority.
 
 ## Schema, restore and future mailbox lifecycle
 
-New SQLite files use schema 5 (application ID 1330463049); new PostgreSQL mail
-schemas use version 3. SQLite 1..4 and PostgreSQL 1..2 are rejected unchanged,
+New SQLite files use schema 6 (application ID 1330463049); new PostgreSQL mail
+schemas use version 4. SQLite 1..5 and PostgreSQL 1..3 are rejected unchanged,
 including prior receipt history. No implicit backfill or migration is supplied.
 Existing stores require a separately reviewed, backed-up migration before this
 code can be used with their data. Do not delete an old store to make it open.

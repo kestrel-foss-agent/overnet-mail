@@ -142,3 +142,9 @@ lab/readonly-imap/store-helper.pl
 lab/readonly-imap/test-bridge.py
 lab/readonly-imap/test-protocol.py
 lab/readonly-imap/test-readonly.py
+
+lib/Overnet/Mail/Store/Inbound.pm
+t/inbound.t
+docs/recipient-routing.md
+t/inbound-recovery.t
+t/postgres-inbound.t

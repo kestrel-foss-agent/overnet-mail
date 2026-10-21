@@ -74,6 +74,19 @@ my $mailbox = $request->{mailbox} // $config->{mailbox_id};
 my $answer = {};
 if ($action eq 'init' || $action eq 'ensure') {
     $answer = $store->ensure_mailbox(mailbox_id => $mailbox);
+} elsif ($action eq 'route') {
+    $answer = $store->register_recipient(recipient => $request->{recipient}, mailbox_id => $mailbox);
+} elsif ($action eq 'receive_delivery') {
+    $answer = $store->receive_delivery(
+        source_id => $request->{source_id},
+        idempotency_key => $request->{key},
+        recipient => $request->{recipient},
+        received_at => $request->{received_at} // 1700000000,
+        message => Overnet::Mail::RawMessage->new(
+            raw_bytes => decode_base64($request->{raw_b64}),
+            max_bytes => ($request->{max_bytes} // 10485760),
+        ),
+    );
 } elsif ($action eq 'receive' || $action eq 'bulk') {
     my $count = $action eq 'receive' ? 1 : $request->{count};
     $count =~ /\A[1-9][0-9]{0,3}\z/ && $count <= 4200 or die "fixture count limit\n";
@@ -89,6 +102,16 @@ if ($action eq 'init' || $action eq 'ensure') {
     }
 } elsif ($action eq 'state') {
     $answer = $store->mailbox_state(mailbox_id => $mailbox);
+} elsif ($action eq 'custody_counts') {
+    # Count every fixture table so rejected routing cannot silently leave a blob,
+    # mailbox, receipt, envelope, route, or queued delivery behind.
+    my $tables = $pg
+        ? $dbh->selectcol_arrayref('SELECT tablename FROM pg_tables WHERE schemaname = ? ORDER BY tablename', undef, $config->{schema})
+        : $dbh->selectcol_arrayref(q{SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name});
+    for my $table (@{$tables}) {
+        my $quoted = $dbh->quote_identifier($table);
+        $answer->{$table} = 0 + $dbh->selectrow_array("SELECT COUNT(*) FROM $quoted");
+    }
 } elsif ($action eq 'uidnext') {
     $dbh->do('UPDATE mailboxes SET uidnext = ? WHERE mailbox_id = ?', undef, $request->{value}, $mailbox);
 } elsif ($action eq 'old_schema') {
@@ -116,5 +139,8 @@ if ($action eq 'init' || $action eq 'ensure') {
 # This fixture's JSON transport deliberately serializes receipt time as a number;
 # the Store API and immutable value are unchanged.
 $answer->{received_at} = 0 + $answer->{received_at} if $action eq 'receive' || $action eq 'bulk';
+if ($action eq 'receive_delivery' && $answer->{status} eq 'received') {
+    $answer->{receipt}{received_at} = 0 + $answer->{receipt}{received_at};
+}
 $store->disconnect;
 print JSON->new->canonical->encode($answer), "\n";

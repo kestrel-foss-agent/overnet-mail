@@ -39,7 +39,7 @@ my $message = Overnet::Mail::RawMessage->new(
 subtest 'shared authoritative content, recipient privacy, pagination, and offline reopen' => sub {
   my $schema = provision();
   my $store  = open_store($schema);
-  is $store->_dbh->selectrow_array('SELECT version FROM overnet_mail_schema'), 3,
+  is $store->_dbh->selectrow_array('SELECT version FROM overnet_mail_schema'), 4,
     'PostgreSQL mailbox schema marker is explicit';
   my $first = receive($store);
   is [sort keys %{$first}], [qw(content_sha256 entry_id received_at)], 'receipt contains only recipient metadata';
@@ -661,6 +661,9 @@ q{SELECT conname FROM pg_constraint WHERE conrelid = 'mailbox_entries'::regclass
   );
   $dbh->do('ALTER TABLE mailbox_entries DROP CONSTRAINT ' . $dbh->quote_identifier($_)) for @{$constraints};
   $dbh->do('ALTER TABLE mailbox_entries DROP COLUMN uid');
+  $dbh->do('ALTER TABLE mailbox_entries DROP COLUMN receipt_namespace');
+  $dbh->do('ALTER TABLE mailbox_entries ADD UNIQUE(mailbox_id, idempotency_key)');
+  $dbh->do('DROP TABLE recipient_routes');
   $dbh->do('DROP TABLE mailboxes');
   $dbh->do('DROP TABLE mailbox_uidvalidity');
   $dbh->do('ALTER TABLE overnet_mail_schema DROP CONSTRAINT overnet_mail_schema_version_check');
