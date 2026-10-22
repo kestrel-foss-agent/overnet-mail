@@ -28,9 +28,10 @@ my $entry = $store->load_mailbox_entry(
 accepted by this API. Tokens use the same bounded ASCII grammar as archive IDs.
 `received_at` is required: caller-supplied canonical Unix seconds from 0 through
 9999999999. It records the first receipt, not a parsed Date header or a claim
-that a remote peer delivered at that exact time. Authorization, routing and local
-account existence must be established by the trusted caller before entering this
-boundary. Neither a known mailbox ID nor a content hash confers permission.
+that a remote peer delivered at that exact time. Authorization and local account existence must be established by the trusted
+caller before entering this direct boundary. The subsequent
+[recipient routing layer](recipient-routing.md) supplies an explicit address-based
+receive API and immutable mappings to existing mailboxes. Neither a known mailbox ID nor a content hash confers permission.
 The library never derives recipients from To, Cc, Bcc or other MIME headers.
 
 Each receipt contains exactly `entry_id`, `content_sha256`, and `received_at`.
@@ -102,8 +103,8 @@ collection, quota or retention policy is added.
 
 ## Schema and validation
 
-New SQLite databases use application ID 1330463049 and schema version 5. New
-PostgreSQL mail schemas use independent version 3. Prior versions are rejected
+New SQLite databases use application ID 1330463049 and schema version 6. New
+PostgreSQL mail schemas use independent version 4. Prior versions are rejected
 unchanged. There is no implicit migration, mailbox inference or promotion of old
 archive records. Preserve a verified backup and use prior code for old stores
 until an explicit reviewed migration exists. PostgreSQL still requires separate

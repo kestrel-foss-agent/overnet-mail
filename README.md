@@ -64,7 +64,7 @@ Net::Blossom’s SQLite BlobStore and MetadataStore now own byte storage and blo
 metadata. Mail-specific records and the recipient outbox share their DBI handle
 and one atomic transaction. No Blossom HTTP server, public blob URLs or second
 mail authority are introduced. See [the integration contract](docs/blossom-storage.md).
-New databases use schema version 5; version 1, 2, 3 and 4 files are rejected unchanged
+New databases use schema version 6; version 1, 2, 3, 4 and 5 files are rejected unchanged
 until an explicit backed-up migration is available.
 
 The separate `Overnet::Mail::Store::Postgres` adapter is experimental until its
@@ -94,8 +94,10 @@ adds UIDVALIDITY, UIDNEXT and mailbox-local UIDs. A
 [read-only Dovecot integration lab](lab/readonly-imap/README.md) now connects those
 Store APIs to a pinned mature IMAP parser through local pipes, with synthetic
 SQLite/PostgreSQL tests. It opens no IMAP listener and implements no login or
-account mapping. Identity/routing, deployment, and broad ordinary-client
-interoperability remain ahead. Reuse maintained CPAN libraries and
+account mapping. The [recipient routing boundary](docs/recipient-routing.md) now binds explicit
+envelope addresses to existing mailboxes and commits durable source-scoped
+receipts, with unknown-recipient rejection and retry/crash tests. Login, network
+ingress, deployment and broad ordinary-client interoperability remain ahead. Reuse maintained CPAN libraries and
 existing MTA and mailbox servers instead of implementing their protocols from scratch.
 
 ## License

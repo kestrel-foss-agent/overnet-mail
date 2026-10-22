@@ -22,7 +22,7 @@ my $empty = {uidvalidity => 1, uidnext => 1, message_count => 0};
 subtest 'mailbox initialization is durable and read-only queries do not allocate identifiers' => sub {
   my $file  = "$dir/empty.db";
   my $store = Overnet::Mail::Store->new(path => $file);
-  is $store->_dbh->selectrow_array('PRAGMA user_version'),              5,     'durable UID schema is version five';
+  is $store->_dbh->selectrow_array('PRAGMA user_version'),              6,     'durable routing schema is version six';
   is $store->mailbox_state(mailbox_id => 'recipient-box'),              undef, 'unknown mailbox has no state';
   is $store->mailbox_uid_entries(mailbox_id => 'recipient-box'),        [],    'unknown mailbox has no UIDs';
   is $store->load_mailbox_uid(mailbox_id => 'recipient-box', uid => 1), undef, 'unknown mailbox has no UID content';

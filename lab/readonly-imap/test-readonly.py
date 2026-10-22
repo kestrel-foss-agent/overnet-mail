@@ -146,6 +146,11 @@ class ReadOnlyIntegration(unittest.TestCase):
     def receive(self, raw=PLAIN, key='message', **args):
         return self.fixture('receive', raw_b64=base64.b64encode(raw).decode(), key=key, **args)
 
+    def receive_delivery(self, raw=PLAIN, key='delivery', recipient='Alice@example.test',
+                         source_id='local-mta', **args):
+        return self.fixture('receive_delivery', raw_b64=base64.b64encode(raw).decode(),
+                            key=key, recipient=recipient, source_id=source_id, **args)
+
     def helper(self, request, config=None):
         return subprocess.run([PERL, str(HERE/'store-helper.pl'), str(config or self.config)],
                               env=ENV, input=request, capture_output=True, timeout=12)
@@ -462,6 +467,131 @@ class ReadOnlyIntegration(unittest.TestCase):
         out = self.wire(b'a EXAMINE INBOX\r\nb UID FETCH 2 BODY.PEEK[]\r\nz LOGOUT\r\n')
         self.assertNotIn(b'BODY[] {', out)
         self.assertRegex(out, rb'b NO |\* BYE ')
+
+
+    def test_18_routed_delivery_replay_and_wrong_mailbox_isolation(self):
+        other = self.new_config(mailbox='other', shared=self.config)
+        self.fixture('ensure', mailbox='other')
+        self.fixture('route', recipient='Alice@EXAMPLE.TEST')
+        self.fixture('route', recipient='Bob@example.test', mailbox='other')
+        first = self.receive_delivery(received_at='1700000000')
+        self.assertEqual(first['status'], 'received')
+        self.assertEqual(first['receipt']['received_at'], 1700000000)
+        self.assertEqual(first['receipt']['content_sha256'], hashlib.sha256(PLAIN).hexdigest())
+        private = HEADER + b'Subject: Other routed mailbox\r\n\r\nOnly Bob receives this.\r\n'
+        self.assertEqual(self.receive_delivery(raw=private, recipient='Bob@example.test')['status'], 'received')
+        before, other_before = self.fixture('state'), self.fixture('state', config=other)
+        # Canonical domain spelling resolves the same route and replay identity.
+        self.assertEqual(self.receive_delivery(recipient='Alice@Example.Test', received_at=1700000999), first)
+        self.assertEqual(self.fixture('state'), before)
+        self.assertEqual(self.fixture('state', config=other), other_before)
+        alice, bob = self.client(expected=1), self.client(config=other, expected=1)
+        self.assertNotEqual(alice.process.pid, bob.process.pid)
+        self.assertEqual(self.body(alice, 1), PLAIN)
+        self.assertEqual(self.body(bob, 1), private)
+        self.assertEqual(alice.uid('SEARCH', None, 'ALL'), ('OK', [b'1']))
+        self.assertEqual(bob.uid('SEARCH', None, 'ALL'), ('OK', [b'1']))
+        self.assertEqual(alice.uid('FETCH', '2', '(UID)'), ('OK', [None]))
+        self.assertEqual(bob.uid('FETCH', '2', '(UID)'), ('OK', [None]))
+        alice.logout()
+        bob.logout()
+        self.assertEqual(self.helper_body(1), PLAIN)
+        self.assertEqual(self.helper_body(1, other), private)
+        self.assertEqual(self.fixture('state'), before)
+        self.assertEqual(self.fixture('state', config=other), other_before)
+
+    def test_19_unknown_recipient_takes_no_custody(self):
+        self.fixture('route', recipient='Alice@example.test')
+        before, counts = self.fixture('state'), self.fixture('custody_counts')
+        never_stored = HEADER + b'Subject: Unknown recipient\r\n\r\nNo custody before a route exists.\r\n'
+        # Local-part case is not folded, and visible To headers are not routes.
+        for recipient in ['alice@example.test', 'reader@example.invalid', 'unregistered@example.test']:
+            self.assertEqual(self.receive_delivery(raw=never_stored, recipient=recipient),
+                             {'status': 'unknown_recipient'})
+            self.assertEqual(self.fixture('custody_counts'), counts)
+            self.assertEqual(self.fixture('state'), before)
+        c = self.client(expected=0)
+        self.assertEqual(c.uid('SEARCH', None, 'ALL'), ('OK', [b'']))
+        c.logout()
+        # Reusing the exact previously rejected identity after registration is
+        # a first receipt, not a stale acknowledged or partially stored attempt.
+        self.fixture('route', recipient='unregistered@example.test')
+        accepted = self.receive_delivery(raw=never_stored, recipient='unregistered@example.test',
+                                         received_at=1700001234)
+        self.assertEqual(accepted['status'], 'received')
+        self.assertEqual(accepted['receipt']['received_at'], 1700001234)
+        c = self.client(expected=1)
+        self.assertEqual(c.response('UIDNEXT')[1], [b'2'])
+        self.assertEqual(self.body(c, 1), never_stored)
+        c.logout()
+
+    def test_20_independent_clients_refresh_reconnect_and_offline_arrival(self):
+        self.fixture('route', recipient='Alice@example.test')
+        initial = self.fixture('state')
+        first, second = self.client(expected=0), self.client(expected=0)
+        self.assertNotEqual(first.process.pid, second.process.pid)
+        receipts = [self.receive_delivery(raw=PLAIN, key='online')]
+        for client in [first, second]:
+            self.assertEqual(client.noop()[0], 'OK')
+            self.assertEqual(client.uid('SEARCH', None, 'ALL'), ('OK', [b'1']))
+            self.assertEqual(self.body(client, 1), PLAIN)
+        first.logout()
+        receipts.append(self.receive_delivery(raw=ENCODED, key='one-client-online', received_at=1700000061))
+        self.assertEqual(second.noop()[0], 'OK')
+        self.assertEqual(second.uid('SEARCH', None, 'ALL'), ('OK', [b'1 2']))
+        self.assertEqual(self.body(second, 2), ENCODED)
+        second.logout()
+        # No IMAP process is connected during this incoming delivery.
+        self.assertTrue(all(c.process.poll() is not None for c in [first, second]))
+        receipts.append(self.receive_delivery(raw=MULTIPART, key='all-clients-offline', received_at=1700003601))
+        before = self.fixture('state')
+        self.assertEqual(before['uidvalidity'], initial['uidvalidity'])
+        self.assertEqual((before['uidnext'], before['message_count']), (4, 3))
+        third, fourth = self.client(expected=3), self.client(expected=3)
+        self.assertNotEqual(third.process.pid, fourth.process.pid)
+        corpus = [PLAIN, ENCODED, MULTIPART]
+        for client in [third, fourth]:
+            self.assertEqual(client.response('UIDVALIDITY')[1], [str(initial['uidvalidity']).encode()])
+            self.assertEqual(client.response('UIDNEXT')[1], [b'4'])
+            self.assertEqual(client.uid('SEARCH', None, 'ALL'), ('OK', [b'1 2 3']))
+            for uid, raw in enumerate(corpus, 1):
+                self.assertEqual(self.body(client, uid), raw)
+                self.assertEqual(self.body(client, uid, 'BODY.PEEK[]<13.27>'), raw[13:40])
+                status, dates = client.uid('FETCH', str(uid), '(UID INTERNALDATE)')
+                self.assertEqual(status, 'OK', dates)
+                received = imaplib.Internaldate2tuple(dates[0])
+                self.assertIsNotNone(received)
+                self.assertEqual(int(time.mktime(received)), receipts[uid-1]['receipt']['received_at'])
+        for raw, key, original in zip(corpus, ['online', 'one-client-online', 'all-clients-offline'], receipts):
+            self.assertEqual(self.receive_delivery(raw=raw, key=key, received_at=1700009999), original)
+        for client in [third, fourth]:
+            self.assertEqual(client.noop()[0], 'OK')
+            self.assertEqual(client.uid('SEARCH', None, 'ALL'), ('OK', [b'1 2 3']))
+            self.assertEqual(client.uid('FETCH', '4', '(UID)'), ('OK', [None]))
+            client.logout()
+        self.assertEqual(self.fixture('state'), before)
+
+    def test_21_delivery_namespaces_preserve_distinct_receipt_uids(self):
+        self.fixture('route', recipient='Alice@example.test')
+        self.fixture('route', recipient='alias@example.test')
+        direct = self.receive(key='same-key')
+        routed = self.receive_delivery(key='same-key')
+        source = self.receive_delivery(key='same-key', source_id='second-local-mta')
+        alias = self.receive_delivery(key='same-key', recipient='alias@example.test')
+        ids = [direct['entry_id']] + [result['receipt']['entry_id'] for result in [routed, source, alias]]
+        self.assertEqual(len(set(ids)), 4)
+        self.assertEqual(self.receive(key='same-key'), direct)
+        self.assertEqual(self.receive_delivery(key='same-key'), routed)
+        self.assertEqual(self.receive_delivery(key='same-key', source_id='second-local-mta'), source)
+        self.assertEqual(self.receive_delivery(key='same-key', recipient='alias@example.test'), alias)
+        before = self.fixture('state')
+        c = self.client(expected=4)
+        self.assertEqual(c.response('UIDNEXT')[1], [b'5'])
+        self.assertEqual(c.uid('SEARCH', None, 'ALL'), ('OK', [b'1 2 3 4']))
+        for uid in range(1, 5):
+            self.assertEqual(self.body(c, uid), PLAIN)
+        c.logout()
+        self.assertEqual(self.fixture('state'), before)
 
 
 if __name__ == '__main__':

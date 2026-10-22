@@ -32,11 +32,12 @@ CREATE TABLE mailbox_entries (
       entry_id $primary_key CHECK(entry_id BETWEEN 1 AND 999999999999999999),
       mailbox_id TEXT NOT NULL REFERENCES mailboxes(mailbox_id),
       uid $integer NOT NULL CHECK(uid BETWEEN 1 AND 4294967294),
+      receipt_namespace TEXT NOT NULL DEFAULT 'direct',
       idempotency_key TEXT NOT NULL,
       content_sha256 TEXT NOT NULL REFERENCES blossom_blobs(sha256)
         REFERENCES blossom_blob_data(storage_key),
       received_at $integer NOT NULL CHECK(received_at BETWEEN 0 AND 9999999999),
-      UNIQUE(mailbox_id, idempotency_key),
+      UNIQUE(mailbox_id, receipt_namespace, idempotency_key),
       UNIQUE(mailbox_id, uid)
 )
 ENTRIES
@@ -48,42 +49,55 @@ ENTRIES
 sub receive_message {
   my ($self, %args) = @_;
   _mailbox_token($args{mailbox_id});
-  _mailbox_token($args{idempotency_key});
-  _mailbox_integer($args{received_at}, 0, 9_999_999_999);
-  if (!blessed($args{message}) || !$args{message}->isa('Overnet::Mail::RawMessage')) {
+  my $message = $self->_receipt_message(\%args);
+  return $self->_transaction(sub { return $self->_receive_message(\%args, $message, 'direct') });
+}
+
+sub _receipt_message {
+  my ($self, $args) = @_;
+  _mailbox_token($args->{idempotency_key});
+  _mailbox_integer($args->{received_at}, 0, 9_999_999_999);
+  if (!blessed($args->{message}) || !$args->{message}->isa('Overnet::Mail::RawMessage')) {
     croak 'receive_message requires a RawMessage';
   }
-  my ($message) = $self->_item($args{message});
-  return $self->_transaction(
-    sub {
-      my $dbh      = $self->_dbh;
-      my $existing = $dbh->selectrow_hashref(
-'SELECT entry_id, content_sha256, received_at FROM mailbox_entries WHERE mailbox_id = ? AND idempotency_key = ?',
-        undef, $args{mailbox_id}, $args{idempotency_key},
-      );
-      if ($existing) {
-        my $stored = $self->_content($existing->{content_sha256});
-        if ($existing->{content_sha256} ne $message->content_sha256 || $stored->raw_bytes ne $message->raw_bytes) {
-          croak 'mailbox idempotency key conflicts with received message';
-        }
-        return $existing;
-      }
-      my $state = $self->_ensure_mailbox($args{mailbox_id});
-      my $uid   = $state->{uidnext};
-      croak 'mailbox UID space exhausted' if $uid == 4_294_967_295;
-      $dbh->do('UPDATE mailboxes SET uidnext = uidnext + 1 WHERE mailbox_id = ?', undef, $args{mailbox_id});
-      $self->_store_content($message);
-      $dbh->do(
-'INSERT INTO mailbox_entries (mailbox_id, uid, idempotency_key, content_sha256, received_at) VALUES (?, ?, ?, ?, ?)',
-        undef, $args{mailbox_id}, $uid, $args{idempotency_key}, $message->content_sha256, $args{received_at},
-      );
-      return {
-        entry_id       => $self->_insert_id('mailbox_entries', 'entry_id'),
-        content_sha256 => $message->content_sha256,
-        received_at    => $args{received_at},
-      };
-    }
+  my ($message) = $self->_item($args->{message});
+  return $message;
+}
+
+sub _receive_message {
+  my ($self, $args, $message, $namespace) = @_;
+  my $dbh      = $self->_dbh;
+  my $existing = $dbh->selectrow_hashref(
+'SELECT entry_id, content_sha256, received_at FROM mailbox_entries WHERE mailbox_id = ? AND receipt_namespace = ? AND idempotency_key = ?',
+    undef, $args->{mailbox_id}, $namespace, $args->{idempotency_key},
   );
+  if ($existing) {
+    my $stored = $self->_content($existing->{content_sha256});
+    if ($existing->{content_sha256} ne $message->content_sha256 || $stored->raw_bytes ne $message->raw_bytes) {
+      croak 'mailbox idempotency key conflicts with received message';
+    }
+    return $existing;
+  }
+  my $state = $self->_ensure_mailbox($args->{mailbox_id});
+  my $uid   = $state->{uidnext};
+  croak 'mailbox UID space exhausted' if $uid == 4_294_967_295;
+  $dbh->do('UPDATE mailboxes SET uidnext = uidnext + 1 WHERE mailbox_id = ?', undef, $args->{mailbox_id});
+  $self->_store_content($message);
+  $dbh->do(
+'INSERT INTO mailbox_entries (mailbox_id, uid, receipt_namespace, idempotency_key, content_sha256, received_at) VALUES (?, ?, ?, ?, ?, ?)',
+    undef,
+    $args->{mailbox_id},
+    $uid,
+    $namespace,
+    $args->{idempotency_key},
+    $message->content_sha256,
+    $args->{received_at},
+  );
+  return {
+    entry_id       => $self->_insert_id('mailbox_entries', 'entry_id'),
+    content_sha256 => $message->content_sha256,
+    received_at    => $args->{received_at},
+  };
 }
 
 sub mailbox_entries {
@@ -343,7 +357,7 @@ Moo::Role, strictures, Carp and Scalar::Util; shared Store supplies persistence.
 
 =head1 INCOMPATIBILITIES
 
-Requires SQLite mail schema 5 or PostgreSQL mail schema 3. Prior schemas are
+Requires SQLite mail schema 6 or PostgreSQL mail schema 4. Prior schemas are
 rejected unchanged; no implicit migration or adoption of archive rows occurs.
 
 =head1 BUGS AND LIMITATIONS
