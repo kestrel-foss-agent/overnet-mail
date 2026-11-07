@@ -148,3 +148,15 @@ t/inbound.t
 docs/recipient-routing.md
 t/inbound-recovery.t
 t/postgres-inbound.t
+docs/inbound-mta-adapter.md
+t/inbound-mta-contract.t
+t/fixtures/inbound-mta/message.eml
+t/fixtures/inbound-mta/partial-retry.json
+.gitattributes
+.github/workflows/inbound-intake.yml
+lab/inbound-mta/README.md
+lab/inbound-mta/intake.py
+lab/inbound-mta/requirements.txt
+lab/inbound-mta/store-delivery.pl
+lab/inbound-mta/test-intake.py
+lab/inbound-mta/test-readback.py

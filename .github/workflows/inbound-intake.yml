@@ -1,0 +1,40 @@
+name: Persistent inbound intake components
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  components:
+    name: SQLite Store and libmilter callbacks (not full Postfix)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: shogo82148/actions-setup-perl@53e33bb27be492a926eee378e8a5f7ff6618b061 # v1.43.1
+        with:
+          perl-version: '5.40'
+      - name: Install official build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgmp-dev libpq-dev libmilter-dev python3-dev python3-venv build-essential pkg-config libssl-dev libpcre2-dev zlib1g-dev
+          cpanm --installdeps .
+          python3 -m venv "$RUNNER_TEMP/intake-python"
+          "$RUNNER_TEMP/intake-python/bin/pip" install --require-hashes -r lab/inbound-mta/requirements.txt
+      - name: Prepare platform syscall definitions
+        run: |
+          bash scripts/prepare-syscall-headers.sh "$RUNNER_TEMP/overnet-syscall"
+          echo "PERL5LIB=$RUNNER_TEMP/overnet-syscall${PERL5LIB:+:$PERL5LIB}" >> "$GITHUB_ENV"
+      - name: Test persistent intake and fail-closed Store delivery
+        run: |
+          "$RUNNER_TEMP/intake-python/bin/python" lab/inbound-mta/test-intake.py
+          prove -Ilib t/inbound-mta-contract.t t/inbound.t t/inbound-recovery.t
+      - name: Build pinned Dovecot and verify intake Store readback
+        run: |
+          lab/readonly-imap/bootstrap-dovecot.sh "$RUNNER_TEMP/dovecot-245"
+          lab/readonly-imap/build-plugin.sh "$RUNNER_TEMP/dovecot-245/runtime" "$RUNNER_TEMP/overnet-imap-plugin"
+          "$RUNNER_TEMP/intake-python/bin/python" lab/inbound-mta/test-readback.py --prefix "$RUNNER_TEMP/dovecot-245/runtime" --plugin-dir "$RUNNER_TEMP/overnet-imap-plugin"
