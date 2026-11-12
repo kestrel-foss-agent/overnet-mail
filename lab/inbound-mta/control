@@ -3,7 +3,7 @@ set -euo pipefail
 # Never operate on host services or host data. Every command is confined to the
 # disposable Docker runtime and its network-none namespace.
 [[ ${OVERNET_INBOUND_MTA_LAB:-} == 1 && -f /lab/versions.txt && -f /.dockerenv && $EUID == 0 ]] || exit 2
-for tool in ip ss awk grep timeout runuser start-stop-daemon postfix postconf postqueue postsuper install find ps readlink; do
+for tool in ip ss awk grep timeout runuser start-stop-daemon postfix postconf postqueue postsuper install find ps; do
   command -v "$tool" >/dev/null || { echo "Missing required lab dependency: $tool" >&2; exit 2; }
 done
 routes=$(ip route show) || exit 2
@@ -47,8 +47,58 @@ assert_listeners() {
 
 stop_milter() {
   if [[ -f $MILTER_PID ]]; then
-    timeout --kill-after=2s 10s start-stop-daemon --stop --pidfile "$MILTER_PID" \
-      --user intake --exec "$(readlink -f "$PYTHON")" --retry TERM/5/KILL/2 --oknodo || return $?
+    # /proc/PID/exe needs ptrace access across UIDs even for container root.
+    # Pin the PID with a pidfd, then require the service UID and exact argv.
+    # Never trust the service-owned pidfile alone or signal a reused PID.
+    timeout --kill-after=2s 10s "$PYTHON" - "$MILTER_PID" "$(id -u intake)" \
+      "$PYTHON" /src/lab/inbound-mta/intake.py serve \
+      /lab/intake/ledger.sqlite /lab/milter/intake.sock \
+      alice@reference.invalid bob@reference.invalid <<'STOP_MILTER' || return $?
+import os
+from pathlib import Path
+import select
+import signal
+import sys
+
+pidfile, uid, *expected = sys.argv[1:]
+pid_text = Path(pidfile).read_text().strip()
+if not pid_text.isascii() or not pid_text.isdecimal() or int(pid_text) <= 1:
+    raise SystemExit('Invalid Milter pidfile')
+pid = int(pid_text)
+try:
+    handle = os.pidfd_open(pid)
+except ProcessLookupError:
+    sys.exit(0)
+try:
+    poller = select.poll()
+    poller.register(handle, select.POLLIN)
+    if poller.poll(0):
+        sys.exit(0)
+    try:
+        status = Path(f'/proc/{pid}/status').read_text()
+        actual_uid = next(line.split()[1:] for line in status.splitlines()
+                          if line.startswith('Uid:'))
+        command = Path(f'/proc/{pid}/cmdline').read_bytes().split(b'\0')[:-1]
+    except FileNotFoundError:
+        if poller.poll(0):
+            sys.exit(0)
+        raise
+    if poller.poll(0):
+        sys.exit(0)
+    if actual_uid != [uid] * 4 or command != [os.fsencode(arg) for arg in expected]:
+        raise SystemExit('Refusing to stop PID that is not the expected intake Milter')
+    for sig, milliseconds in ((signal.SIGTERM, 5000), (signal.SIGKILL, 2000)):
+        try:
+            signal.pidfd_send_signal(handle, sig)
+        except ProcessLookupError:
+            break
+        if poller.poll(milliseconds):
+            break
+    else:
+        raise SystemExit('Milter did not stop within bounded deadline')
+finally:
+    os.close(handle)
+STOP_MILTER
   fi
   rm -f "$MILTER_PID" /lab/milter/intake.sock
 }
