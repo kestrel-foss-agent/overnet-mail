@@ -136,6 +136,10 @@ this fixture does not replace them or lower coverage gates.
 
 ## Gate for the subsequent real-engine increment
 
+The [prepared disposable inbound lab](../lab/inbound-mta/real-postfix.md) supplies
+a proposed CI harness for this gate. It has not yet executed against the real
+engines and is not evidence that the gate passes.
+
 Choose and document a supported mature-MTA local interface and its delivery
 identity first. Then run the same scenario through that actual interface, in an
 isolated synthetic lab, and verify normal, lost-ack and partial-recipient retries.

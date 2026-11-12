@@ -160,3 +160,15 @@ lab/inbound-mta/requirements.txt
 lab/inbound-mta/store-delivery.pl
 lab/inbound-mta/test-intake.py
 lab/inbound-mta/test-readback.py
+lab/inbound-mta/Dockerfile
+lab/inbound-mta/control
+lab/inbound-mta/main.cf
+lab/inbound-mta/master.cf
+lab/inbound-mta/pipe-delivery
+lab/inbound-mta/real-postfix.md
+lab/inbound-mta/recipients
+lab/inbound-mta/store-fixture.pl
+lab/inbound-mta/test-pipe-wrapper.py
+lab/inbound-mta/test-postfix.py
+lab/inbound-mta/test-store-fixture.t
+scripts/inbound-mta-lab.sh

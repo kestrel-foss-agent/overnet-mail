@@ -89,8 +89,11 @@ sender submission** can create another token and delivery; this is not exactly-o
 Internet delivery.
 
 Current Postfix `postsuper -r` documentation says administrative requeue bypasses
-both Milter settings. Treat it as the same intake only while the original token,
-recipient and bytes survive unchanged; otherwise defer for operator review.
+both Milter settings. Its pickup path also prepends another Received header,
+which is outside this adapter's one-transport-header boundary. Administrative
+requeue is therefore unsupported and must defer for operator review; the prepared
+CI lab asserts this negative behavior. It must not guess which sender headers to
+strip or create a replacement token.
 Reinjection through the designated SMTP intake is a new delivery. Never recover
 metadata from sender headers or guess a lost ledger binding from a queue ID.
 
@@ -100,6 +103,13 @@ recreation. Restoring Store or a queue/ledger snapshot independently can roll ba
 custody and is **unsupported**. Random IDs do not repair database rollback. Keep
 ledger and Store crash/backup procedures coordinated; process tests do not prove
 power-loss durability. Source replacement needs explicit operator planning.
+
+## Prepared real-engine CI follow-up
+
+A [separate disposable inbound lab](real-postfix.md) now prepares actual
+Postfix/Milter/pipe assertions for SQLite and PostgreSQL using the existing
+real-MTA lab's isolation pattern. Its new engine job has not yet been run. Local
+fixture checks do not change the unverified integration status above.
 
 ## Local verification
 

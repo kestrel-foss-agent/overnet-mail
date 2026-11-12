@@ -11,7 +11,7 @@ prototype, network exposure or persistent Dovecot copy is added.
 $store->ensure_mailbox(mailbox_id => 'alice');
 $store->register_recipient(recipient => 'alice@example.test', mailbox_id => 'alice');
 my $result = $store->receive_delivery(
-  source_id => 'local-mta', idempotency_key => 'stable-queue-id',
+  source_id => 'local-mta', idempotency_key => 'durable-delivery-token',
   recipient => 'alice@example.test', message => $raw_message, received_at => 100,
 );
 ```
@@ -49,8 +49,8 @@ Multiple recipients are individually atomic, not an all-recipient transaction.
 If a later recipient fails, earlier custody remains and must replay safely.
 
 Replay identity is `(source_id, canonical recipient, idempotency_key)`. The source
-is a stable trusted ingestion namespace and the key a stable upstream queue
-identity, neither derived from untrusted MIME headers. New source/key means new
+is a stable trusted ingestion namespace and the key a durable, non-reused upstream
+delivery token, neither derived from untrusted MIME headers. New source/key means new
 delivery, even for the same bytes. This is not transport-wide exactly-once mail
 if the upstream peer loses or changes its identity.
 

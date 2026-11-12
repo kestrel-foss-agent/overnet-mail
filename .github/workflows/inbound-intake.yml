@@ -1,4 +1,4 @@
-name: Persistent inbound intake components
+name: Persistent inbound intake
 
 on:
   push:
@@ -32,9 +32,19 @@ jobs:
       - name: Test persistent intake and fail-closed Store delivery
         run: |
           "$RUNNER_TEMP/intake-python/bin/python" lab/inbound-mta/test-intake.py
-          prove -Ilib t/inbound-mta-contract.t t/inbound.t t/inbound-recovery.t
+          "$RUNNER_TEMP/intake-python/bin/python" lab/inbound-mta/test-pipe-wrapper.py
+          prove -Ilib t/inbound-mta-contract.t t/inbound.t t/inbound-recovery.t lab/inbound-mta/test-store-fixture.t
       - name: Build pinned Dovecot and verify intake Store readback
         run: |
           lab/readonly-imap/bootstrap-dovecot.sh "$RUNNER_TEMP/dovecot-245"
           lab/readonly-imap/build-plugin.sh "$RUNNER_TEMP/dovecot-245/runtime" "$RUNNER_TEMP/overnet-imap-plugin"
           "$RUNNER_TEMP/intake-python/bin/python" lab/inbound-mta/test-readback.py --prefix "$RUNNER_TEMP/dovecot-245/runtime" --plugin-dir "$RUNNER_TEMP/overnet-imap-plugin"
+
+  postfix-integration:
+    name: Postfix Milter and pipe to SQLite and PostgreSQL 15
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build and run disposable network-isolated inbound lab
+        run: bash scripts/inbound-mta-lab.sh check
