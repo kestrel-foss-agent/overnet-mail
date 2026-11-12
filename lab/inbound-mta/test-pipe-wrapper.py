@@ -33,8 +33,10 @@ class PipeWrapperTests(unittest.TestCase):
         (self.base / 'faults').mkdir()
         self.config = self.base / 'store.json'
         self.config.write_text(json.dumps({'engine': 'sqlite', 'path': str(self.base / 'store.sqlite')}))
-        subprocess.run(['perl', str(HERE / 'store-fixture.pl'), str(self.config),
-                        'provision', A, 'alice'], check=True, capture_output=True, timeout=15)
+        fixture = subprocess.run(['perl', str(HERE / 'store-fixture.pl'), str(self.config),
+                                  'provision', A, 'alice'], capture_output=True, timeout=15)
+        self.assertEqual(fixture.returncode, 0,
+                         'Store fixture failed: ' + fixture.stderr.decode(errors='replace'))
         self.ledger = intake.Ledger.initialize(self.base / 'ledger.sqlite')
         self.token = self.ledger.issue(lab.CONTENT, [A, B], 1700000000)
         self.raw = (b'Received: by fixture.invalid id SYNTHETIC\r\n' +
@@ -48,10 +50,27 @@ class PipeWrapperTests(unittest.TestCase):
     def event(self):
         return json.loads((self.base / 'events.jsonl').read_text().splitlines()[-1])
 
-    def test_postfix_sanitized_path_uses_fixed_image_runtime(self):
-        with mock.patch.dict(pipe.os.environ, {'PATH': '/usr/bin:/bin'}):
-            self.assertEqual(pipe.attempt(self.base, A, self.raw), 0)
+    def test_postfix_entrypoint_selects_fixed_image_runtime(self):
+        # This tests runtime selection, not Store custody. Real Store tests
+        # below use the runner's Perl; the Docker job tests the fixed image path.
+        def observe_attempt(base, address, raw):
             self.assertEqual(pipe.os.environ['PATH'], '/usr/local/bin:/usr/bin:/bin')
+            self.assertEqual((base, address, raw), (Path('/lab/intake'), A, self.raw))
+            return 0
+
+        with mock.patch.dict(pipe.os.environ, {'PATH': '/usr/bin:/bin',
+                                              'OVERNET_INBOUND_MTA_LAB': '1'}), \
+                mock.patch.object(pipe.sys, 'argv', ['pipe-delivery', A]), \
+                mock.patch.object(pipe.Path, 'is_file', return_value=True), \
+                mock.patch.object(pipe.intake, 'read_bounded', return_value=self.raw), \
+                mock.patch.object(pipe, 'attempt', side_effect=observe_attempt) as attempt:
+            self.assertEqual(pipe.main(), 0)
+            attempt.assert_called_once()
+
+    def test_imported_attempt_preserves_runner_path(self):
+        before = pipe.os.environ.get('PATH')
+        self.assertEqual(pipe.attempt(self.base, A, self.raw), 0)
+        self.assertEqual(pipe.os.environ.get('PATH'), before)
         self.assertEqual(len(self.rows()), 1)
 
     def test_normal_and_replay_acknowledgements(self):

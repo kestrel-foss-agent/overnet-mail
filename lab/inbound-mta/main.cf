@@ -78,4 +78,5 @@ minimal_backoff_time = 1s
 maximal_backoff_time = 5s
 maximal_queue_lifetime = 1h
 bounce_queue_lifetime = 1h
-maillog_file = /dev/stdout
+# A real log avoids reopening root-owned redirected stdout after privilege drop.
+maillog_file = /var/log/inbound-postfix.log

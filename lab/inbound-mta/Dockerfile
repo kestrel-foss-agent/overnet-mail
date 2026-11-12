@@ -23,6 +23,7 @@ RUN cpanm --installdeps . \
  && cp lab/inbound-mta/main.cf lab/inbound-mta/master.cf /etc/postfix/ \
  && cp lab/inbound-mta/recipients /etc/postfix/lab-recipients \
  && postmap /etc/postfix/lab-recipients \
+ && install -o postfix -g postfix -m 640 /dev/null /var/log/inbound-postfix.log \
  && install -o root -g root -m 755 lab/inbound-mta/control /lab/control \
  && chmod 755 lab/inbound-mta/pipe-delivery \
  && install -d -o intake -g postfix -m 2750 /lab/milter \

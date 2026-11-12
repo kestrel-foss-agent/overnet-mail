@@ -40,7 +40,12 @@ WIRE = (TOKEN_HEADER + b': ' + b'0' * 64 + b'\r\n' +
 
 
 def run(*args, timeout=20):
-    return subprocess.run(args, check=True, capture_output=True, timeout=timeout).stdout
+    result = subprocess.run(args, capture_output=True, timeout=timeout)
+    if result.returncode:
+        raise RuntimeError(f'{args!r} exited {result.returncode}: '
+                           + result.stderr.decode(errors='replace')
+                           + result.stdout.decode(errors='replace'))
+    return result.stdout
 
 
 def control(*args):
