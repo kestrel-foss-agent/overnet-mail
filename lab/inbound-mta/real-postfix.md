@@ -93,8 +93,9 @@ to pass delivery: exact expected Store receipt counts must also be observed.
 One explicit synthetic address map, one Milter and one recipient per pipe
 invocation are allowed. The pipe uses CRLF framing and no flags that prepend
 headers or alter bytes. Normal pickup/sendmail/postdrop submission is disabled.
-The private pickup service exists solely for the bounded, root-controlled
-administrative requeue assertion; no public pickup socket is created. No SMTP
+The container-local pickup endpoint supports standard queue flush and the
+bounded, root-controlled administrative requeue assertion. Submission remains
+disabled through `authorized_submit_users`; this endpoint is not a network listener. No SMTP
 Internet client transport, catch-all, alias expansion or automatic Bcc route
 is enabled. This is not a production configuration template.
 

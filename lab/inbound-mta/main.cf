@@ -34,8 +34,8 @@ milter_connect_timeout = 5s
 milter_command_timeout = 5s
 milter_content_timeout = 20s
 non_smtpd_milters =
-# Disable non-SMTP submission. The private pickup service exists only so the
-# privileged integration test can exercise administrative postsuper -r.
+# Disable non-SMTP submission. Pickup exists for standard queue flush and
+# privileged test-only administrative postsuper -r.
 authorized_submit_users =
 local_transport = error:local delivery disabled in synthetic lab
 alias_maps =
