@@ -1,0 +1,297 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# Never operate on host services or host data. Every command is confined to the
+# disposable Docker runtime and its network-none namespace.
+[[ ${OVERNET_INBOUND_MTA_LAB:-} == 1 && -f /lab/versions.txt && -f /.dockerenv && $EUID == 0 ]] || exit 2
+for tool in ip ss awk grep timeout runuser start-stop-daemon postfix postconf postqueue postsuper install find ps readlink; do
+  command -v "$tool" >/dev/null || { echo "Missing required lab dependency: $tool" >&2; exit 2; }
+done
+routes=$(ip route show) || exit 2
+routes6=$(ip -6 route show) || exit 2
+[[ $(ls /sys/class/net) == lo && -z $routes && -z $routes6 ]] || {
+  echo 'Inbound lab requires an isolated loopback-only namespace' >&2
+  exit 2
+}
+cd /src
+export PERL5LIB=/lab/syscall:/src/lib
+PG_BIN=/usr/lib/postgresql/15/bin
+PG_DATA=/lab/postgres/data
+PG_SOCKET=/lab/postgres/socket
+PYTHON=/lab/venv/bin/python
+MILTER_PID=/lab/milter/intake.pid
+
+wait_port() {
+  local port=$1 state=$2 attempt listeners
+  for ((attempt=0; attempt<100; attempt++)); do
+    listeners=$(ss -ltnH "sport = :$port") || return 1
+    if [[ -n $listeners ]]; then
+      [[ $state == up ]] && return 0
+    else
+      [[ $state == down ]] && return 0
+    fi
+    sleep .1
+  done
+  echo "Listener $port failed to become $state" >&2
+  return 1
+}
+
+assert_listeners() {
+  # PostgreSQL and the Milter must remain Unix-only. SMTP is the only TCP port.
+  local listeners
+  listeners=$(ss -ltnH) || return 1
+  if [[ -n $listeners ]] && printf '%s\n' "$listeners" | awk '{print $4}' | grep -v '^127\.0\.0\.1:2525$'; then
+    echo 'Unexpected TCP listener in inbound lab' >&2
+    return 1
+  fi
+}
+
+stop_milter() {
+  if [[ -f $MILTER_PID ]]; then
+    timeout --kill-after=2s 10s start-stop-daemon --stop --pidfile "$MILTER_PID" \
+      --user intake --exec "$(readlink -f "$PYTHON")" --retry TERM/5/KILL/2 --oknodo || return $?
+  fi
+  rm -f "$MILTER_PID" /lab/milter/intake.sock
+}
+
+stop_postgres() {
+  if [[ -f $PG_DATA/postmaster.pid ]]; then
+    timeout --kill-after=2s 15s runuser -u postgres -- "$PG_BIN/pg_ctl" \
+      -D "$PG_DATA" -m fast -w -t 10 stop >>/lab/services.log 2>&1
+  fi
+}
+
+stop_postfix() {
+  local status
+  if timeout 5 postfix status >>/lab/services.log 2>&1; then
+    timeout --kill-after=2s 10s postfix stop >>/lab/services.log 2>&1 || return $?
+  else
+    status=$?
+    [[ $status == 1 ]] || return "$status"
+  fi
+  wait_port 2525 down || return $?
+  wait_postfix_stopped
+}
+
+wait_postfix_stopped() {
+  # The listener can disappear before an active pipe/Store commit finishes.
+  # Inspect command lines rather than /proc/exe (which can require ptrace
+  # capabilities). The independently managed Milter is deliberately excluded.
+  local postfix_uid daemon_directory
+  postfix_uid=$(id -u postfix) || return 1
+  daemon_directory=$(postconf -h daemon_directory) || return 1
+  timeout --kill-after=2s 40s "$PYTHON" - "$postfix_uid" "$daemon_directory" <<'QUIESCENCE'
+from pathlib import Path
+import subprocess
+import sys
+import time
+
+postfix_uid, daemon_dir = sys.argv[1:]
+wrapper = '/src/lab/inbound-mta/pipe-delivery'
+helper = '/src/lab/inbound-mta/store-delivery.pl'
+intake = '/src/lab/inbound-mta/intake.py'
+deadline = time.monotonic() + 35
+while True:
+    listing = subprocess.run(['ps', '-eo', 'euid=,stat=,comm=,args='],
+                             check=True, capture_output=True, text=True, timeout=2)
+    active = set()
+    for line in listing.stdout.splitlines():
+        uid, state, command, args = line.split(None, 3)
+        if state.startswith('Z'):
+            continue
+        words = args.split()
+        is_postfix = uid == postfix_uid
+        if uid == '0' and words:
+            is_postfix |= (str(Path(words[0]).parent) == daemon_dir
+                           or command in {'master', 'pipe'} and Path(words[0]).name == command)
+        is_delivery = wrapper in words or helper in words
+        if intake in words:
+            index = words.index(intake)
+            is_delivery |= words[index + 1:index + 2] == ['deliver']
+        if is_postfix or is_delivery:
+            active.add(command)
+    if not active:
+        break
+    if time.monotonic() >= deadline:
+        raise SystemExit('Postfix/pipe children did not stop: ' + ', '.join(sorted(active)))
+    time.sleep(.25)
+QUIESCENCE
+}
+
+wait_services_stopped() {
+  local attempt processes intake_uid postfix_uid
+  intake_uid=$(id -u intake) || return 1
+  postfix_uid=$(id -u postfix) || return 1
+  for ((attempt=0; attempt<300; attempt++)); do
+    processes=$(ps -eo euid=,stat=) || return 1
+    if ! printf '%s\n' "$processes" | awk -v a="$intake_uid" -v b="$postfix_uid" \
+      '($1 == a || $1 == b) && $2 !~ /^Z/ { found = 1 } END { exit !found }'; then
+      return 0
+    fi
+    sleep .1
+  done
+  echo 'Postfix or intake child processes remain after stopping services' >&2
+  return 1
+}
+
+stop_all() {
+  local result=0
+  stop_postfix || result=1
+  stop_milter || result=1
+  stop_postgres || result=1
+  wait_services_stopped || result=1
+  return "$result"
+}
+
+start_postgres() {
+  [[ -f $PG_DATA/PG_VERSION && $(cat "$PG_DATA/PG_VERSION") == 15 ]] || {
+    echo 'PostgreSQL 15 lab data is not provisioned' >&2
+    return 1
+  }
+  timeout --kill-after=2s 15s runuser -u postgres -- "$PG_BIN/pg_ctl" \
+    -D "$PG_DATA" -l /lab/postgres/postgres.log -w -t 10 start >>/lab/services.log 2>&1
+  timeout 5 runuser -u postgres -- "$PG_BIN/pg_isready" -q -h "$PG_SOCKET" -p 5432
+  assert_listeners
+}
+
+provision_postgres() {
+  install -d -o postgres -g postgres -m 755 /lab/postgres
+  install -d -o postgres -g postgres -m 700 "$PG_DATA"
+  # Socket itself is usable by the intake role, but only that OS group (and
+  # postgres) can traverse its parent. pg_hba still requires matching OS IDs.
+  install -d -o postgres -g intake -m 750 "$PG_SOCKET"
+  timeout --kill-after=2s 30s runuser -u postgres -- "$PG_BIN/initdb" \
+    -D "$PG_DATA" --auth-local=peer --auth-host=reject --encoding=UTF8 --locale=C \
+    >>/lab/services.log 2>&1
+  cat >>"$PG_DATA/postgresql.conf" <<'PGCONF'
+listen_addresses = ''
+port = 5432
+unix_socket_directories = '/lab/postgres/socket'
+unix_socket_permissions = 0777
+shared_buffers = '16MB'
+max_connections = 20
+fsync = on
+full_page_writes = on
+synchronous_commit = on
+PGCONF
+  start_postgres
+  timeout 10 runuser -u postgres -- "$PG_BIN/psql" -X -h "$PG_SOCKET" -d postgres \
+    -v ON_ERROR_STOP=1 -c 'CREATE ROLE intake LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;'
+  timeout 10 runuser -u postgres -- "$PG_BIN/psql" -X -h "$PG_SOCKET" -d postgres \
+    -v ON_ERROR_STOP=1 -c 'CREATE DATABASE intake OWNER intake;'
+  timeout 10 runuser -u postgres -- "$PG_BIN/psql" -X -h "$PG_SOCKET" -d intake \
+    -v ON_ERROR_STOP=1 -c 'REVOKE CREATE ON SCHEMA public FROM PUBLIC;'
+}
+
+reset_lab() {
+  local engine=$1
+  [[ $engine == sqlite || $engine == postgres ]] || return 2
+  # Reset is explicit, privileged, and available only in this disposable image.
+  # Never erase a ledger or queue while any service might still be using it.
+  stop_all
+  timeout 10 postsuper -d ALL >>/lab/services.log 2>&1
+  # postsuper's default set excludes maildrop and auxiliary status records.
+  # Remove those stopped-service remnants as well, retaining queue ownership.
+  local queue
+  for queue in active bounce corrupt defer deferred flush hold incoming maildrop saved trace; do
+    if [[ -d /var/spool/postfix/$queue ]]; then
+      find "/var/spool/postfix/$queue" -type f -delete
+    fi
+  done
+  rm -rf -- /lab/intake /lab/postgres
+  install -d -o intake -g intake -m 700 /lab/intake /lab/intake/faults
+  timeout 10 runuser -u intake -- "$PYTHON" lab/inbound-mta/intake.py init /lab/intake/ledger.sqlite
+  case "$engine" in
+    sqlite)
+      printf '%s\n' '{"engine":"sqlite","path":"/lab/intake/store.sqlite"}' > /lab/intake/store.json
+      ;;
+    postgres)
+      provision_postgres
+      printf '%s\n' '{"engine":"postgres","dsn":"dbi:Pg:dbname=intake;host=/lab/postgres/socket;port=5432","schema":"inbound_lab"}' > /lab/intake/store.json
+      ;;
+  esac
+  chown root:intake /lab/intake/store.json
+  chmod 640 /lab/intake/store.json
+  printf '%s\n' "$engine" > /lab/engine
+  assert_listeners
+}
+
+[[ $# -ge 1 ]] || { echo 'Missing lab command' >&2; exit 2; }
+case "$1" in
+  reset)
+    [[ $# == 2 ]] || exit 2
+    reset_lab "$2"
+    ;;
+  milter-start)
+    [[ $# == 1 && -f /lab/intake/ledger.sqlite && -f /lab/intake/store.json ]] || exit 2
+    # Refuse accidental double-start; stop/restart must be explicit.
+    [[ ! -e $MILTER_PID && ! -e /lab/milter/intake.sock ]] || exit 2
+    # The pidfile directory is writable after --chuid; stopping also matches
+    # both uid and Python executable, never a service-owned pidfile alone.
+    timeout --kill-after=2s 10s start-stop-daemon --start --background --no-close --make-pidfile \
+      --pidfile "$MILTER_PID" --chuid intake:intake --umask 007 \
+      --startas "$PYTHON" -- /src/lab/inbound-mta/intake.py serve \
+      /lab/intake/ledger.sqlite /lab/milter/intake.sock \
+      alice@reference.invalid bob@reference.invalid </dev/null >>/lab/services.log 2>&1
+    ready=0
+    for ((attempt=0; attempt<100; attempt++)); do
+      if [[ -S /lab/milter/intake.sock ]]; then ready=1; break; fi
+      sleep .1
+    done
+    [[ $ready == 1 ]] || { echo 'Milter socket did not become ready' >&2; stop_milter; exit 1; }
+    chown intake:postfix /lab/milter/intake.sock
+    chmod 660 /lab/milter/intake.sock
+    assert_listeners
+    ;;
+  milter-stop) [[ $# == 1 ]] || exit 2; stop_milter ;;
+  postfix-start)
+    [[ $# == 1 ]] || exit 2
+    timeout 10 postfix check >>/lab/services.log 2>&1
+    timeout --kill-after=2s 10s postfix start </dev/null >>/lab/services.log 2>&1
+    wait_port 2525 up
+    assert_listeners
+    ;;
+  postfix-stop) [[ $# == 1 ]] || exit 2; stop_postfix ;;
+  postfix-flush) [[ $# == 1 ]] || exit 2; timeout 10 postfix flush ;;
+  postgres-start) [[ $# == 1 ]] || exit 2; start_postgres ;;
+  postgres-stop) [[ $# == 1 ]] || exit 2; stop_postgres ;;
+  queue-json) [[ $# == 1 ]] || exit 2; timeout 10 postqueue -j ;;
+  queue-requeue)
+    [[ $# == 2 && $2 =~ ^[A-F0-9]{5,32}$ ]] || exit 2
+    timeout 10 postsuper -r "$2"
+    ;;
+  stop) [[ $# == 1 ]] || exit 2; stop_all ;;
+  check)
+    [[ $# == 1 ]] || exit 2
+    touch /lab/services.log
+    finish() {
+      local result=$?
+      trap - EXIT
+      stop_all || result=1
+      cat /lab/services.log
+      [[ ! -f /var/log/inbound-postfix.log ]] || cat /var/log/inbound-postfix.log
+      if [[ $result != 0 && -f /lab/intake/events.jsonl ]]; then
+        tail -n 80 /lab/intake/events.jsonl
+      fi
+      [[ ! -f /lab/postgres/postgres.log ]] || cat /lab/postgres/postgres.log
+      exit "$result"
+    }
+    trap finish EXIT
+    cat /lab/versions.txt
+    perl -V:version
+    [[ $(id -u intake) != "$(id -u postfix)" && $(id -u intake) != "$(id -u postgres)" ]]
+    [[ $(postconf -h mail_owner) == postfix ]]
+    "$PYTHON" -c 'import Milter, sqlite3'
+    perl -MDBD::Pg -MDBD::SQLite -MOvernet::Mail::Store -e 1
+    timeout 10 postfix check
+    for engine in sqlite postgres; do
+      echo "=== Full inbound Postfix/Milter/pipe integration: $engine ==="
+      reset_lab "$engine"
+      timeout --kill-after=10s 240s "$PYTHON" lab/inbound-mta/test-postfix.py --engine "$engine"
+      stop_all
+    done
+    ;;
+  *)
+    echo 'Usage: control check|reset sqlite|postgres|stop|milter-start|milter-stop|postfix-start|postfix-stop|postfix-flush|postgres-start|postgres-stop|queue-json|queue-requeue ID' >&2
+    exit 2
+    ;;
+esac

@@ -1,0 +1,26 @@
+# Only synthetic loopback SMTP. There is no Internet SMTP or LMTP client.
+127.0.0.1:2525 inet n - n - - smtpd
+showq     unix n - n - - showq
+# Standard pickup endpoint is required by postqueue -f and test-only requeue.
+# This is container-local; authorized_submit_users remains empty.
+pickup    unix n - n 1 1 pickup
+cleanup   unix n - n - 0 cleanup
+qmgr      unix n - n 1 1 qmgr
+rewrite   unix - - n - - trivial-rewrite
+bounce    unix - - n - 0 bounce
+defer     unix - - n - 0 bounce
+trace     unix - - n - 0 bounce
+verify    unix - - n - 1 verify
+flush     unix n - n 1000? 0 flush
+proxymap  unix - - n - - proxymap
+proxywrite unix - - n - 1 proxymap
+error     unix - - n - - error
+retry     unix - - n - - error
+discard   unix - - n - - discard
+anvil     unix - - n - 1 anvil
+scache    unix - - n - 1 scache
+postlog   unix-dgram n - n - 1 postlogd
+# Exactly one recipient, explicit CRLF, and no flags that add/rewrite content.
+# intake is distinct from root, postfix (mail_owner), and postgres.
+intake    unix - n n - - pipe
+  user=intake eol=\r\n argv=/src/lab/inbound-mta/pipe-delivery ${recipient}
