@@ -67,8 +67,9 @@ mail authority are introduced. See [the integration contract](docs/blossom-stora
 New databases use schema version 6; version 1, 2, 3, 4 and 5 files are rejected unchanged
 until an explicit backed-up migration is available.
 
-The separate `Overnet::Mail::Store::Postgres` adapter is experimental until its
-real PostgreSQL CI passes. It reuses the same acceptance/outbox state machine and
+The separate `Overnet::Mail::Store::Postgres` adapter has passed real PostgreSQL
+17 CI and remains experimental for production operation. It reuses the same
+acceptance/outbox state machine and
 Net::Blossom PostgreSQL components. Explicit schema provisioning, one shared DBI
 handle, and serialized transactions keep custody atomic; database-wide
 serialization intentionally limits throughput, including across schemas.
