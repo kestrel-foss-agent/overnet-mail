@@ -100,9 +100,12 @@ receipts, with unknown-recipient rejection and retry/crash tests. An
 [inbound-MTA acceptance contract](docs/inbound-mta-adapter.md) and synthetic
 retry transcript specify the adapter boundary. A [persistent intake and local
 delivery prototype](lab/inbound-mta/README.md) now implements independent durable
-tokens and fail-closed Store delivery; full Postfix master/pipe verification is
-still outstanding. The synthetic fixture itself does not implement an MTA. Login, network
-ingress, deployment and broad ordinary-client interoperability remain ahead. Reuse maintained CPAN libraries and
+tokens and fail-closed Store delivery. The [isolated inbound lab](lab/inbound-mta/real-postfix.md)
+has passed real Postfix/Milter/pipe CI with SQLite and PostgreSQL. This verifies
+the bounded synthetic prototype, not production ingress or a continuous
+Postfix-to-Dovecot session. The synthetic fixture itself does not implement an MTA.
+Login, production network ingress, deployment and broad ordinary-client
+interoperability remain ahead. Reuse maintained CPAN libraries and
 existing MTA and mailbox servers instead of implementing their protocols from scratch.
 
 ## License
