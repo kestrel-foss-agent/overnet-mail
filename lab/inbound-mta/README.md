@@ -1,13 +1,14 @@
 # Persistent intake and local Store delivery prototype
 
-**Local synthetic prototype. No running mail service, deployment, authentication,
-Internet SMTP listener, real mail, or complete Postfix integration proof.**
-The Python/libmilter intake and one-recipient delivery command now implement the
-identity boundary. They use the existing Perl Store, without introducing another
-mailbox authority. Full Postfix master/pipe still requires a suitably isolated
-multi-user runtime and end-to-end tests. Standalone Dovecot 2.4.5 readback from
-this new SQLite delivery path has passed through local pipes without a multi-user
-runtime. PostgreSQL remains unverified.
+**Isolated synthetic prototype. No deployed mail service, authentication,
+Internet SMTP listener or real mail.**
+The Python/libmilter intake and one-recipient delivery command implement the
+identity boundary using the existing Perl Store, without another mailbox authority.
+The disposable multi-user CI lab has passed real Postfix/Milter/pipe integration
+with SQLite and PostgreSQL 15. Standalone Dovecot 2.4.5 readback from this new
+SQLite delivery path has also passed. These are separate checks: one continuous
+real-Postfix-to-Dovecot session and PostgreSQL Dovecot readback through this new
+intake remain unverified. See the [verified CI evidence](real-postfix.md#verified-ci).
 
 ## Components and trust
 
@@ -91,8 +92,8 @@ Internet delivery.
 Current Postfix `postsuper -r` documentation says administrative requeue bypasses
 both Milter settings. Its pickup path also prepends another Received header,
 which is outside this adapter's one-transport-header boundary. Administrative
-requeue is therefore unsupported and must defer for operator review; the prepared
-CI lab asserts this negative behavior. It must not guess which sender headers to
+requeue is therefore unsupported and must defer for operator review; the
+CI lab has verified this negative behavior. It must not guess which sender headers to
 strip or create a replacement token.
 Reinjection through the designated SMTP intake is a new delivery. Never recover
 metadata from sender headers or guess a lost ledger binding from a queue ID.
@@ -104,12 +105,13 @@ custody and is **unsupported**. Random IDs do not repair database rollback. Keep
 ledger and Store crash/backup procedures coordinated; process tests do not prove
 power-loss durability. Source replacement needs explicit operator planning.
 
-## Prepared real-engine CI follow-up
+## Verified real-engine CI
 
-A [separate disposable inbound lab](real-postfix.md) now prepares actual
+The [separate disposable inbound lab](real-postfix.md) has passed actual
 Postfix/Milter/pipe assertions for SQLite and PostgreSQL using the existing
-real-MTA lab's isolation pattern. Its new engine job has not yet been run. Local
-fixture checks do not change the unverified integration status above.
+real-MTA lab's isolation pattern. Its linked CI evidence covers ordinary retry,
+restart, partial recipients, lost Store acknowledgements and fail-closed probes.
+Local component fixtures alone do not establish these real-engine results.
 
 ## Local verification
 

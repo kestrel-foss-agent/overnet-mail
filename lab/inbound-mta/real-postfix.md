@@ -1,10 +1,27 @@
-# Disposable inbound Postfix integration follow-up
+# Disposable inbound Postfix integration lab
 
-This is a **prepared, not yet executed** real-engine test increment for the
-persistent-intake prototype. Local static and SQLite fixture checks are not
-Postfix or PostgreSQL evidence. Do not call the inbound milestone complete until
-the new CI job passes on the actual published commit and its logs are reviewed.
-There is no deployment, real mail, authentication change or Internet relay.
+This isolated real-engine lab has passed Postfix/Milter/pipe integration against
+SQLite and PostgreSQL 15 for the persistent-intake prototype. Local static and
+SQLite fixture checks remain distinct from this real-engine evidence. There is
+no deployment, real mail, authentication change or Internet relay.
+
+## Verified CI
+
+On 2026-11-18, all post-merge workflows passed for main commit
+`7c790787a90d6e58bfba10a8f685174878b9914d`:
+
+- [Persistent inbound intake](https://github.com/kestrel-foss-agent/overnet-mail/actions/runs/44229244749):
+  component tests, SQLite Dovecot readback, and real Postfix/Milter/pipe tests
+  with SQLite and PostgreSQL 15.
+- [Read-only Dovecot integration](https://github.com/kestrel-foss-agent/overnet-mail/actions/runs/44229244868).
+- [Perl quality](https://github.com/kestrel-foss-agent/overnet-mail/actions/runs/44229244644):
+  normal, author and source-distribution tests, unchanged 95/85/100 coverage
+  floors, and the separate outbound real-MTA custody lab.
+
+The passing inbound suite covers the assertions below, including PostgreSQL
+restart persistence and unsupported administrative requeue deferral. This is
+evidence for the bounded lab, not production readiness or a continuous
+Postfix-to-Dovecot session; see the remaining limits below.
 
 ## Why a separate lab
 
@@ -17,8 +34,8 @@ the existing outbound proof or substitute its passing results for inbound tests.
 
 The local editing environment cannot provide Postfix's required service users
 or start the PostgreSQL socket. Installing another client cannot remove that
-boundary. This work prepares CI execution without retrying those restricted
-operations, changing local sandbox policy or using a replacement transport.
+boundary. CI supplied the isolated runtime without retrying those restricted
+local operations, changing sandbox policy or using a replacement transport.
 
 ## Run
 
@@ -45,7 +62,7 @@ No actual account or password is used. The Store fixture creates its dedicated
 schema using upstream supported Blossom setup. The delivery helper still only
 exposes receive_delivery, not administrative setup.
 
-## Assertions in the proposed CI gate
+## Assertions in the verified CI gate
 
 The same SMTP-to-Store suite runs with SQLite and PostgreSQL:
 

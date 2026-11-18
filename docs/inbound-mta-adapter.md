@@ -1,21 +1,23 @@
 # Inbound MTA adapter acceptance contract
 
-## Status and smallest missing increment
+## Status and remaining integration boundary
 
 This document and `t/fixtures/inbound-mta/partial-retry.json` define a **local
 synthetic acceptance contract**. A [persistent intake and local delivery
-prototype](../lab/inbound-mta/README.md) now implements the component boundary;
-it has not passed a complete Postfix master/pipe integration. The executable
+prototype](../lab/inbound-mta/README.md) implements the component boundary and
+has passed isolated real Postfix/Milter/pipe CI with SQLite and PostgreSQL. The executable
 oracle `t/inbound-mta-contract.t` drives the existing SQLite `receive_delivery`
 API. It opens no socket, launches no mail service and sends no email.
 
 The [existing real-MTA lab](real-mta-lab.md) proves application-outbox handoff
 to Postfix and delivery into a separate reference Dovecot mailbox. The
 [read-only IMAP lab](../lab/readonly-imap/README.md) retrieves the authoritative
-Store through Dovecot after direct Store calls. Neither currently demonstrates
-an MTA delivering into that Store. The next integration should connect these
-boundaries, not create a second mailbox authority or implement SMTP/IMAP parsing.
-It can use published main without the separate, unpublished Blossom reuse work.
+Store through Dovecot after direct Store calls. The separate
+[inbound lab](../lab/inbound-mta/real-postfix.md#verified-ci) now demonstrates
+real Postfix delivery into Store. SQLite intake-to-Dovecot readback also passes,
+but one continuous real-Postfix-to-Dovecot session and PostgreSQL Dovecot readback
+through this new intake remain separate extensions. Those should connect the
+existing boundaries, not create another mailbox authority or SMTP/IMAP parser.
 
 ## Trusted delivery request
 
@@ -64,8 +66,9 @@ without calling Store or acknowledging custody.
 
 The local prototype now persists independent tokens through a libmilter intake
 and verifies their immutable bindings before Store delivery. Its documented
-byte boundary and restricted ingress topology are essential, and full real-engine
-verification remains outstanding. Do not wire `${queue_id}` directly to
+byte boundary and restricted ingress topology are essential. Its isolated
+real-engine checks have passed; administrative requeue remains unsupported and
+must defer, while SMTP reinjection is a new delivery. Do not wire `${queue_id}` directly to
 `idempotency_key` or deploy a queue-ID-only pipe.
 The synthetic fixture supplies tokens directly so it can test the required
 Store behavior without pretending to prove their production provenance.
@@ -134,18 +137,17 @@ Postfix behavior. Reopening a database is not a process-kill or power-loss test.
 Existing `inbound-recovery.t`, PostgreSQL and Dovecot tests remain mandatory;
 this fixture does not replace them or lower coverage gates.
 
-## Gate for the subsequent real-engine increment
+## Real-engine gate and remaining extensions
 
-The [prepared disposable inbound lab](../lab/inbound-mta/real-postfix.md) supplies
-a proposed CI harness for this gate. It has not yet executed against the real
-engines and is not evidence that the gate passes.
+The [disposable inbound lab](../lab/inbound-mta/real-postfix.md#verified-ci) has
+passed the real Postfix/Milter/pipe gate with SQLite and PostgreSQL, including
+normal, lost-ack and partial-recipient retries. Component tests separately cover
+input bounds, EOF/truncation, deadlines and metadata spoofing. The synthetic
+fixture remains an oracle, not a substitute for those linked integration runs.
 
-Choose and document a supported mature-MTA local interface and its delivery
-identity first. Then run the same scenario through that actual interface, in an
-isolated synthetic lab, and verify normal, lost-ack and partial-recipient retries.
-Retrieve from the same Store with the existing Dovecot integration. Test input
-bounds, EOF/truncation, deadlines, unknown recipients, metadata spoofing and
-failure-to-acknowledge paths. Validate both SQLite and PostgreSQL. Keep this
-fixture as the oracle, not evidence that any of those integrations already pass.
+Keep all these gates when extending readback to one continuous real-Postfix-to-
+Dovecot session and to PostgreSQL Dovecot readback through this new intake.
+Neither extension, production readiness nor power-loss durability is established
+by the current passing lab.
 No authentication prototype, new external listener, real mail, deployment or
 changes to restricted/unreviewed reuse code are part of this increment.
