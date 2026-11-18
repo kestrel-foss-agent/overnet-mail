@@ -1,8 +1,17 @@
 # PostgreSQL storage milestone
 
-This branch's PostgreSQL adapter is experimental until the exact commit's
-real-service CI is green. Local static checks or SQLite tests alone do not
-validate PostgreSQL support.
+The PostgreSQL adapter has passed real-service CI and remains experimental for
+production operation. On 2026-11-18, main commit
+`4bd3705535900efed8a71be3fef1b7a5e79861fb` passed the
+[PostgreSQL 17 quality workflow](https://github.com/kestrel-foss-agent/overnet-mail/actions/runs/44251371727),
+including both Perl versions, source-distribution tests and the unchanged
+95/85/100 per-file coverage gate. PostgreSQL delivery-runner, inbound, mailbox,
+recovery and storage tests ran successfully against the real service.
+
+This validates the tested Store contract, not production throughput, operational
+readiness, power-loss durability or broad mail-client interoperability. Local
+static checks or SQLite tests alone do not validate PostgreSQL support; future
+changes still require real PostgreSQL evidence from their exact commit.
 
 `Overnet::Mail::Store::Postgres` implements the existing trusted Store API on
 Net::Blossom::Server::Backend::Postgres 0.001004. It uses that distribution's

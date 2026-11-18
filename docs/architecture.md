@@ -57,7 +57,12 @@ must be designed with the authoritative store, before production readiness.
 
 The [local recipient mailbox API](recipient-mailbox.md) chooses the existing
 shared SQL database as authority for incoming membership and immutable Blossom
-content. It is independent of sender archives/private envelopes. A future mature
-IMAP server integration must adapt to this same authority or explicitly migrate
-it; no second independent mailbox state is introduced. Authentication, receipt
-routing and IMAP state semantics are still separate unimplemented boundaries.
+content. It is independent of sender archives/private envelopes. The
+[read-only Dovecot integration](../lab/readonly-imap/README.md) adapts to this
+same authority; no second independent mailbox state is introduced.
+[Recipient routing](recipient-routing.md) and [stable IMAP identifiers](imap-identifiers.md)
+now have bounded Store implementations and tests. Authentication, writable IMAP
+semantics, production ingress and broad ordinary-client interoperability remain
+unimplemented or unverified boundaries. The [inbound lab](../lab/inbound-mta/real-postfix.md)
+does not yet prove a continuous real-Postfix-to-Dovecot session or PostgreSQL
+Dovecot readback through the new intake.
