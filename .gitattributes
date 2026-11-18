@@ -1,0 +1,2 @@
+# Preserve the exact wire octets of the synthetic MIME fixture.
+t/fixtures/inbound-mta/message.eml -text whitespace=cr-at-eol

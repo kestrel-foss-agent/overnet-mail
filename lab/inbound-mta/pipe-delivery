@@ -1,0 +1,82 @@
+#!/lab/venv/bin/python
+"""Test-only fault seam around the unchanged one-recipient intake delivery.
+
+Only the disposable Docker lab may execute this wrapper. Message input never
+selects configuration or fault controls. No fault can forge a successful Store
+receipt. Production code must invoke intake.py directly, not this test seam.
+"""
+import fcntl
+import hashlib
+import json
+import os
+from pathlib import Path
+import sys
+import time
+
+import intake
+
+ADDRESSES = {'alice@reference.invalid': 'alice', 'bob@reference.invalid': 'bob'}
+
+
+def attempt(base, address, raw):
+    """Return Postfix's real pipe exit status; log only synthetic test evidence."""
+    if address not in ADDRESSES:
+        return 75
+    fault_dir = base / 'faults'
+    local = ADDRESSES[address]
+    event = {'recipient': address, 'pid': os.getpid(), 'at_ns': time.time_ns(),
+             'queue_sha256': hashlib.sha256(raw).hexdigest()}
+    try:
+        token, message = intake.queue_boundary(raw)
+        event.update(token=token, message_sha256=hashlib.sha256(message).hexdigest())
+    except Exception:
+        # The actual adapter below still decides custody, never this observer.
+        pass
+    status = 75
+    try:
+        if (fault_dir / ('before-' + local)).exists():
+            event['outcome'] = 'blocked_before_store'
+        else:
+            if (fault_dir / ('alter-' + local)).exists():
+                raw += b'altered-by-test\r\n'
+            intake.deliver(intake.Ledger(base / 'ledger.sqlite'),
+                           base / 'store.json', address, raw)
+            if (fault_dir / ('after-' + local)).exists():
+                event['outcome'] = 'committed_ack_lost'
+            else:
+                event['outcome'] = 'acknowledged'
+                status = 0
+    except Exception:
+        event['outcome'] = 'deferred'
+    # A failed diagnostic write also fails closed, including after Store commit.
+    try:
+        with (base / 'events.jsonl').open('a', encoding='ascii') as log:
+            fcntl.flock(log.fileno(), fcntl.LOCK_EX)
+            log.write(json.dumps(event, sort_keys=True) + '\n')
+            log.flush()
+            os.fsync(log.fileno())
+    except Exception:
+        return 75
+    return status
+
+
+def main():
+    if (os.environ.get('OVERNET_INBOUND_MTA_LAB') != '1'
+            or not Path('/.dockerenv').is_file()
+            or not Path('/lab/versions.txt').is_file()
+            or len(sys.argv) != 2):
+        return 75
+    # Postfix pipe(8) overwrites PATH after export_environment. The image's
+    # official Perl/CPAN runtime is /usr/local, not Debian's /usr/bin Perl.
+    # Set this only at the guarded image entry point: imported component tests
+    # use their configured Perl runtime and must not mutate their caller's PATH.
+    os.environ['PATH'] = '/usr/local/bin:/usr/bin:/bin'
+    try:
+        raw = intake.read_bounded(sys.stdin.fileno(), intake.MAX_QUEUE_BYTES, 15)
+        return attempt(Path('/lab/intake'), sys.argv[1], raw)
+    except Exception:
+        return 75
+
+
+if __name__ == '__main__':
+    sys.exit(main())

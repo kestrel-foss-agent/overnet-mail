@@ -1,0 +1,153 @@
+{
+  "version": 2,
+  "source_id": "synthetic-mta-instance-1",
+  "message_file": "message.eml",
+  "routes": {
+    "alice@example.test": "alice",
+    "bob@example.test": "bob"
+  },
+  "attempts": [
+    {
+      "name": "first-recipient-lost-ack",
+      "recipient": "alice@example.test",
+      "fault": "drop_ack",
+      "expected_result": "defer",
+      "expected_counts": [
+        1,
+        0
+      ],
+      "received_at": 100,
+      "expected_mailbox": "alice",
+      "expected_uid": 1,
+      "delivery_token": "intake-token-001",
+      "queue_id": "QUEUE001"
+    },
+    {
+      "name": "second-recipient-before-custody-failure",
+      "recipient": "bob@example.test",
+      "fault": "fail_before_store",
+      "expected_result": "defer",
+      "expected_counts": [
+        1,
+        0
+      ],
+      "received_at": 101,
+      "delivery_token": "intake-token-001",
+      "queue_id": "QUEUE001"
+    },
+    {
+      "name": "unknown-recipient",
+      "recipient": "unknown@example.test",
+      "fault": "normal",
+      "expected_result": "unknown_recipient",
+      "expected_counts": [
+        1,
+        0
+      ],
+      "received_at": 102,
+      "delivery_token": "intake-token-001",
+      "queue_id": "QUEUE001"
+    },
+    {
+      "name": "retry-first-recipient",
+      "recipient": "alice@EXAMPLE.TEST",
+      "fault": "normal",
+      "expected_result": "received",
+      "expected_counts": [
+        1,
+        0
+      ],
+      "received_at": 103,
+      "expected_mailbox": "alice",
+      "expected_uid": 1,
+      "delivery_token": "intake-token-001",
+      "queue_id": "QUEUE001"
+    },
+    {
+      "name": "retry-second-recipient",
+      "recipient": "bob@example.test",
+      "fault": "normal",
+      "expected_result": "received",
+      "expected_counts": [
+        1,
+        1
+      ],
+      "received_at": 104,
+      "expected_mailbox": "bob",
+      "expected_uid": 1,
+      "delivery_token": "intake-token-001",
+      "queue_id": "QUEUE001"
+    },
+    {
+      "name": "repeat-second-recipient",
+      "recipient": "bob@example.test",
+      "fault": "normal",
+      "expected_result": "received",
+      "expected_counts": [
+        1,
+        1
+      ],
+      "received_at": 105,
+      "expected_mailbox": "bob",
+      "expected_uid": 1,
+      "delivery_token": "intake-token-001",
+      "queue_id": "QUEUE001"
+    },
+    {
+      "name": "same-key-changed-bytes",
+      "recipient": "alice@example.test",
+      "fault": "changed_bytes",
+      "expected_result": "defer",
+      "expected_counts": [
+        1,
+        1
+      ],
+      "received_at": 106,
+      "delivery_token": "intake-token-001",
+      "queue_id": "QUEUE001"
+    },
+    {
+      "name": "reused-queue-id-new-trusted-token-identical-bytes",
+      "recipient": "alice@example.test",
+      "fault": "normal",
+      "expected_result": "received",
+      "expected_counts": [
+        2,
+        1
+      ],
+      "received_at": 107,
+      "expected_mailbox": "alice",
+      "expected_uid": 2,
+      "delivery_token": "intake-token-002",
+      "queue_id": "QUEUE001"
+    },
+    {
+      "name": "header-address-not-route",
+      "recipient": "header-only@example.test",
+      "fault": "normal",
+      "expected_result": "unknown_recipient",
+      "expected_counts": [
+        2,
+        1
+      ],
+      "received_at": 108,
+      "delivery_token": "intake-token-003",
+      "queue_id": "QUEUE001"
+    },
+    {
+      "name": "changed-queue-id-preserved-trusted-token",
+      "recipient": "alice@example.test",
+      "delivery_token": "intake-token-001",
+      "queue_id": "QUEUE999",
+      "fault": "normal",
+      "expected_result": "received",
+      "expected_counts": [
+        2,
+        1
+      ],
+      "received_at": 109,
+      "expected_mailbox": "alice",
+      "expected_uid": 1
+    }
+  ]
+}

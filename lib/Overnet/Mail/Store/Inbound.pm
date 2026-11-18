@@ -106,7 +106,7 @@ Version 0.001.
   $store->ensure_mailbox(mailbox_id => 'alice');
   $store->register_recipient(recipient => 'alice@example.test', mailbox_id => 'alice');
   my $result = $store->receive_delivery(
-    source_id => 'local-mta', idempotency_key => 'queue-id-123',
+    source_id => 'local-mta', idempotency_key => 'durable-delivery-token-123',
     recipient => 'alice@example.test', message => $raw_message, received_at => 100,
   );
 
@@ -155,6 +155,14 @@ means a new delivery even for identical bytes. The library cannot deduplicate an
 upstream peer that loses its queue identity. Immutable bindings prevent a retry
 from silently moving to a new mailbox. Direct SQL changes are outside this
 trusted boundary. Neither route existence nor a mailbox ID is a credential.
+
+A raw MTA queue ID is not a delivery token: queue IDs can be reused. Reusing a
+source/key/recipient tuple with identical octets replays the old receipt and
+silently suppresses the later delivery; changed octets instead fail closed.
+Adding a content hash or Message-ID does not distinguish two legitimate
+byte-identical deliveries. The trusted intake must durably assign a non-reused
+token before the first delivery attempt and preserve it across retries. Without
+that guarantee an adapter must refuse custody, not fall back to a queue ID.
 
 =head1 CONFIGURATION AND ENVIRONMENT
 

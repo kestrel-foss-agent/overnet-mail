@@ -96,7 +96,12 @@ Store APIs to a pinned mature IMAP parser through local pipes, with synthetic
 SQLite/PostgreSQL tests. It opens no IMAP listener and implements no login or
 account mapping. The [recipient routing boundary](docs/recipient-routing.md) now binds explicit
 envelope addresses to existing mailboxes and commits durable source-scoped
-receipts, with unknown-recipient rejection and retry/crash tests. Login, network
+receipts, with unknown-recipient rejection and retry/crash tests. An
+[inbound-MTA acceptance contract](docs/inbound-mta-adapter.md) and synthetic
+retry transcript specify the adapter boundary. A [persistent intake and local
+delivery prototype](lab/inbound-mta/README.md) now implements independent durable
+tokens and fail-closed Store delivery; full Postfix master/pipe verification is
+still outstanding. The synthetic fixture itself does not implement an MTA. Login, network
 ingress, deployment and broad ordinary-client interoperability remain ahead. Reuse maintained CPAN libraries and
 existing MTA and mailbox servers instead of implementing their protocols from scratch.
 

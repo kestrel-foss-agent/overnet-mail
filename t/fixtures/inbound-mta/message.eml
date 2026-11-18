@@ -1,0 +1,19 @@
+From: sender@example.test
+To: header-only@example.test
+Bcc: private-header@example.test
+Message-ID: <not-a-queue-key@example.test>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="fixture"
+
+--fixture
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: base64
+
+U3ludGhldGljIGNhZsOpLg==
+--fixture
+Content-Type: application/octet-stream
+Content-Disposition: attachment; filename="fixture.bin"
+Content-Transfer-Encoding: base64
+
+AAECA/7/
+--fixture--

@@ -1,0 +1,82 @@
+compatibility_level = 3.6
+queue_directory = /var/spool/postfix
+myhostname = intake.reference.invalid
+mydomain = reference.invalid
+myorigin = $mydomain
+inet_interfaces = 127.0.0.1
+inet_protocols = ipv4
+mydestination =
+mynetworks =
+relay_domains =
+virtual_mailbox_domains = reference.invalid
+virtual_mailbox_maps = hash:/etc/postfix/lab-recipients
+virtual_transport = intake
+intake_destination_recipient_limit = 1
+intake_destination_concurrency_limit = 1
+intake_time_limit = 25s
+command_time_limit = 25s
+# Fixed values survive Postfix sanitization, never supplied by message input.
+export_environment = TZ LANG=C OVERNET_INBOUND_MTA_LAB=1 PERL5LIB=/lab/syscall:/src/lib PATH=/usr/local/bin:/usr/bin:/bin
+# No permit_mynetworks shortcut, including for loopback.
+smtpd_relay_restrictions = reject_unauth_destination
+smtpd_recipient_restrictions = reject_unlisted_recipient
+smtpd_reject_unlisted_recipient = yes
+smtpd_recipient_limit = 32
+smtpd_delay_reject = yes
+smtpd_sasl_auth_enable = no
+smtpd_peername_lookup = no
+smtpd_tls_security_level = none
+# The sole network intake is fail-closed and uses the exact-header capability.
+smtpd_milters = unix:/lab/milter/intake.sock
+milter_protocol = 6
+milter_default_action = tempfail
+milter_connect_timeout = 5s
+milter_command_timeout = 5s
+milter_content_timeout = 20s
+non_smtpd_milters =
+# Disable non-SMTP submission. Pickup exists for standard queue flush and
+# privileged test-only administrative postsuper -r.
+authorized_submit_users =
+local_transport = error:local delivery disabled in synthetic lab
+alias_maps =
+alias_database =
+virtual_alias_maps =
+canonical_maps =
+sender_canonical_maps =
+recipient_canonical_maps =
+masquerade_domains =
+always_bcc =
+sender_bcc_maps =
+recipient_bcc_maps =
+content_filter =
+header_checks =
+body_checks =
+mime_header_checks =
+nested_header_checks =
+receive_override_options = no_address_mappings,no_header_body_checks
+local_header_rewrite_clients =
+remote_header_rewrite_domain =
+smtp_dns_support_level = disabled
+smtp_host_lookup = native
+# No Internet transport exists, even if routing is accidentally misconfigured.
+default_transport = error:external delivery disabled in synthetic lab
+relay_transport = error:relay disabled in synthetic lab
+message_size_limit = 65536
+header_size_limit = 65536
+header_address_token_limit = 1024
+line_length_limit = 65536
+mailbox_size_limit = 0
+recipient_delimiter =
+smtputf8_enable = no
+biff = no
+append_dot_mydomain = no
+# Preserve missing/empty origin headers rather than inserting generated ones.
+always_add_missing_headers = no
+enable_long_queue_ids = no
+queue_run_delay = 1s
+minimal_backoff_time = 1s
+maximal_backoff_time = 5s
+maximal_queue_lifetime = 1h
+bounce_queue_lifetime = 1h
+# A real log avoids reopening root-owned redirected stdout after privilege drop.
+maillog_file = /var/log/inbound-postfix.log
